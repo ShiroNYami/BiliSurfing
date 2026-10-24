@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大肥鱼 · B站管理面板</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--line:#e6e8eb;--txt:#25282d;--sub:#7a828c;--pri:#3b82f6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:20px}
+h1{font-size:20px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.field{flex:1 1 200px;min-width:180px}
+label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
+input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;background:#fff}
+button{padding:8px 14px;border:0;border-radius:7px;background:var(--pri);color:#fff;font:inherit;cursor:pointer}
+button.ghost{background:#eef1f5;color:#333}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--sub);font-weight:500}
+.tag{display:inline-block;padding:1px 8px;border-radius:20px;background:#eef4ff;color:#2f6fe4;font-size:12px}
+.tag.off{background:#f1f2f4;color:#888}
+.muted{color:var(--sub);font-size:12px}
+#toast{position:fixed;right:18px;bottom:18px;background:#222;color:#fff;padding:9px 14px;border-radius:8px;opacity:0;transition:.2s}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>大肥鱼 · B站冲浪管理面板</h1>
+
+  <div class="card">
+    <div class="row" id="status"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px">冲浪配置</h3>
+    <div class="row">
+      <div class="field"><label>关键词（逗号分隔）</label><input id="scan_keywords"></div>
+      <div class="field"><label>浏览时段（如 8-22）</label><input id="comment_hours"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>评论最小间隔（分钟）</label><input id="comment_interval_minutes" type="number"></div>
+      <div class="field"><label>播放量门槛</label><input id="min_play" type="number"></div>
+      <div class="field"><label>自动评论</label><select id="auto_comment_enable"><option value="true">开启</option><option value="false">关闭</option></select></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>@ 的 UID</label><input id="comment_target_uid" type="number"></div>
+      <div class="field"><label>@ 的昵称</label><input id="comment_target_name"></div>
+      <div class="field"><label>屏蔽词（逗号分隔）</label><input id="block_words"></div>
+    </div>
+    <div style="margin-top:12px"><button onclick="saveConfig()">保存配置</button></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px">语气记忆（它会优先遵守）</h3>
+    <div class="row">
+      <div class="field" style="flex:3 1 420px"><input id="mem_text" placeholder="例：回复别列点，最多两句话"></div>
+      <div style="display:flex;align-items:flex-end"><button onclick="addMemory()">添加</button></div>
+    </div>
+    <div id="memories" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">浏览 / 评论记录</h3>
+      <button class="ghost" onclick="clearHistory()">清空记录</button>
+    </div>
+    <div id="history" style="margin-top:10px"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const BASE = "/astrbot_plugin_bili_reader";
+const FULL = "/api/plugins/extensions" + BASE;
+const BRIDGE = window.AstrBotPluginPage || window.AstrBotPluginView;
+let STATE = null;
+
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,1800);}
+function getBridge(){ return window.AstrBotPluginPage || window.AstrBotPluginView || null; }
+function waitBridge(timeout){
+  return new Promise((resolve)=>{
+    const started = Date.now();
+    const timer = setInterval(()=>{
+      const b = getBridge();
+      if (b || Date.now() - started > (timeout||4000)) { clearInterval(timer); resolve(b); }
+    }, 60);
+  });
+}
+async function api(path, opts){
+  const method = (opts && opts.method) || "GET";
+  const bridge = getBridge() || await waitBridge();
+  if (!bridge) throw new Error("插件页面桥未注入");
+  let data;
+  if (method === "POST") {
+    const body = opts && opts.body ? JSON.parse(opts.body) : {};
+    const json = JSON.stringify(body);
+    const encoded = btoa(unescape(encodeURIComponent(json)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    data = await bridge.apiGet(path + "/" + encoded);
+  } else {
+    data = await bridge.apiGet(path);
+  }
+  if (data && typeof data === "object" && !Array.isArray(data) && "data" in data && !("config" in data) && !("status" in data)) {
+    data = data.data;
+  }
+  if (data && data.status === "error") throw new Error(data.message || "接口返回错误");
+  return data;
+}
+async function load(){
+  STATE = await api("/state");
+  const s = STATE.status;
+  document.getElementById("status").innerHTML =
+    `<div class="field"><label>状态</label><div><span class="tag ${s.in_window?'':'off'}">${s.in_window?'在时段内':'不在时段'}</span> <span class="muted">${s.window}</span></div></div>
+     <div class="field"><label>上次评论</label><div>${s.last_comment||"还没评论过"}</div></div>
+     <div class="field"><label>下次可评论</label><div>${s.next_allowed||"-"}</div></div>
+     <div class="field"><label>已评论视频</label><div>${s.commented_count} 个</div></div>`;
+  const c = STATE.config;
+  for(const k of ["scan_keywords","comment_hours","comment_interval_minutes","min_play","comment_target_uid","comment_target_name","block_words"]){
+    const el = document.getElementById(k);
+    if(el) el.value = c[k] ?? "";
+  }
+  document.getElementById("auto_comment_enable").value = String(!!c.auto_comment_enable);
+  renderMemories(STATE.memories||[]);
+  renderHistory(STATE.history||[]);
+}
+function renderMemories(list){
+  const box = document.getElementById("memories");
+  if(!list.length){box.innerHTML = '<div class="muted">还没有记忆。</div>';return;}
+  const tag = s => s === "auto" ? '<span class="tag">自动</span>' : '<span class="tag off">手动</span>';
+  box.innerHTML = '<table><tr><th style="width:50px">#</th><th style="width:60px">来源</th><th>内容</th><th style="width:70px"></th></tr>' +
+    list.map(m=>`<tr><td>${m.id}</td><td>${tag(m.source)}</td><td>${escapeHtml(m.text)}</td><td><button class="ghost" onclick="delMemory(${m.id})">删除</button></td></tr>`).join("") + '</table>';
+}
+function renderHistory(list){
+  const box = document.getElementById("history");
+  if(!list.length){box.innerHTML = '<div class="muted">还没有记录。</div>';return;}
+  box.innerHTML = '<table><tr><th>时间</th><th>类型</th><th>视频</th><th>内容</th></tr>' +
+    list.map(h=>`<tr><td>${h.time}</td><td>${h.kind==='comment'?'评论':'浏览'}</td>
+      <td><a href="${h.url}" target="_blank">${escapeHtml(h.title||h.bvid)}</a><div class="muted">${h.play?('播放 '+h.play):''}</div></td>
+      <td>${escapeHtml(h.comment||"")}</td></tr>`).join("") + '</table>';
+}
+function escapeHtml(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+async function saveConfig(){
+  const keys = ["scan_keywords","comment_hours","comment_interval_minutes","min_play","comment_target_uid","comment_target_name","block_words"];
+  const payload = {};
+  for(const k of keys){
+    const v = document.getElementById(k).value;
+    payload[k] = ["comment_interval_minutes","min_play","comment_target_uid"].includes(k) ? Number(v||0) : v;
+  }
+  payload.auto_comment_enable = document.getElementById("auto_comment_enable").value === "true";
+  await api("/config",{method:"POST",body:JSON.stringify(payload)});
+  toast("配置已保存"); await load();
+}
+async function addMemory(){
+  const text = document.getElementById("mem_text").value.trim();
+  if(!text) return toast("先写点内容");
+  await api("/memory",{method:"POST",body:JSON.stringify({action:"add",text})});
+  document.getElementById("mem_text").value="";
+  toast("已添加"); await load();
+}
+async function delMemory(id){
+  await api("/memory",{method:"POST",body:JSON.stringify({action:"delete",id})});
+  toast("已删除"); await load();
+}
+async function clearHistory(){
+  if(!confirm("清空浏览/评论记录？")) return;
+  await api("/history",{method:"POST",body:JSON.stringify({action:"clear"})});
+  toast("已清空"); await load();
+}
+load().catch(e=>toast("加载失败：" + e.message));
+</script>
+</body>
+</html>

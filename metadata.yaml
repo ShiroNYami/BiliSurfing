@@ -1,0 +1,20 @@
+name: astrbot_plugin_bili_reader
+display_name: B站视频阅读
+short_desc: 发 B 站链接，Bot 自己看画面、读字幕和热评，再回答你。
+desc: >-
+  当消息里出现 B 站视频链接（bilibili.com/video、b23.tv 短链、BV 号）时，插件会真实抓取该视频的
+  关键画面（短视频下载后高清抽帧，长视频回退到 B 站剧情图）、标题、简介、CC 字幕和评论区热评，
+  并把这些内容注入本次 LLM 请求。模型因此是“看过”视频再回答，而不是只拿到标题和简介。
+  另附：刷视频挑片、发评论/楼中楼、语气记忆与自动学习、头像生成、WebUI 管理面板。
+help: >-
+  1) 直接发 B 站视频链接 / BV 号 / b23 短链即可，无需命令；
+  2) /刷视频 [关键词] 按关键词挑最近的视频；
+  3) /记住 内容、/记忆、/忘记 管理语气规则；
+  4) 插件卡片里的页面入口打开管理面板（配置、记忆、浏览记录）。
+  需要登录态时在配置里填 B 站 Cookie；评论功能请自行评估账号风险。
+version: v0.2.0
+author: dafiyu
+repo: https://github.com/ShiroNYami/astrbot_plugin_bili_reader
+astrbot_version: ">=4.16,<5"
+support_platforms:
+  - aiocqhttp

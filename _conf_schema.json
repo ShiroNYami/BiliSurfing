@@ -1,0 +1,206 @@
+{
+  "enable": {
+    "type": "bool",
+    "description": "启用视频阅读",
+    "hint": "关闭后插件不再拦截链接。",
+    "default": true
+  },
+  "clean_markdown": {
+    "type": "bool",
+    "description": "发送前清理 Markdown",
+    "hint": "QQ 不渲染 Markdown，开启后会把 **加粗**、## 标题、反引号、- 列表等转成纯文本。",
+    "default": true
+  },
+  "memory_enable": {
+    "type": "bool",
+    "description": "启用长期记忆",
+    "hint": "开启后，用 /记住 教它的规则会写进每次请求，跨会话持久生效；用 /记忆 查看、/忘记 删除。",
+    "default": true
+  },
+  "auto_learn_enable": {
+    "type": "bool",
+    "description": "自动学习语气",
+    "hint": "定时从刷过的视频热评里归纳 1-2 条语气规则，写进记忆（标为「自动」）。你可以在面板里随时删。",
+    "default": true
+  },
+  "auto_learn_interval_hours": {
+    "type": "int",
+    "description": "自动学习间隔（小时）",
+    "hint": "默认 12 小时归纳一次，只有出现新的浏览/评论记录才学。",
+    "default": 12
+  },
+  "auto_learn_max": {
+    "type": "int",
+    "description": "自动记忆条数上限",
+    "hint": "自动学到的规则最多保留这么多条，超了就不再学，避免人格被带偏。默认 8。",
+    "default": 8
+  },
+  "owner_qq": {
+    "type": "string",
+    "description": "允许教它的 QQ 号",
+    "hint": "多个用逗号分隔。只有这些号能用 /记住、/忘记，或让它自己记住规则。留空时以 AstrBot 管理员为准。",
+    "default": ""
+  },
+  "frame_mode": {
+    "type": "string",
+    "description": "抽帧方式",
+    "hint": "auto：短视频下载高清抽帧、长视频用剧情图；storyboard：只用 B 站剧情图（最快最省流量，画质较低）；video：总是下载视频后抽帧（最清晰，较慢）。可选值：auto / storyboard / video。",
+    "default": "auto"
+  },
+  "max_frames": {
+    "type": "int",
+    "description": "每次最多附上多少张画面",
+    "hint": "建议 4-8 张。张数越多模型看到越全，但响应更慢、token 更多。",
+    "default": 6
+  },
+  "max_video_seconds": {
+    "type": "int",
+    "description": "auto 模式下允许下载抽帧的最长视频",
+    "hint": "超过这个时长就自动改用剧情图，避免在 2C2G 服务器上下载大文件。单位：秒，默认 900（15 分钟）。",
+    "default": 900
+  },
+  "max_duration_seconds": {
+    "type": "int",
+    "description": "完全放弃解析的视频时长上限",
+    "hint": "超过这个时长的视频直接跳过，避免长时间占用。单位：秒，默认 3600。",
+    "default": 3600
+  },
+  "max_download_mb": {
+    "type": "int",
+    "description": "单个视频下载体积上限",
+    "hint": "单位 MB，默认 60。超过则放弃下载、回退剧情图。",
+    "default": 60
+  },
+  "include_subtitles": {
+    "type": "bool",
+    "description": "附带 UP 主字幕",
+    "hint": "B 站字幕接口通常需要登录态才返回内容。填写下面的 SESSDATA 后才能稳定读到 CC 字幕。",
+    "default": true
+  },
+  "sessdata": {
+    "type": "string",
+    "description": "B 站 SESSDATA（可选）",
+    "hint": "登录 bilibili.com 后从浏览器 Cookie 里复制 SESSDATA 的值。填写后可以读到 CC 字幕、偶尔也能拿到更高清晰度的视频。留空则只用游客身份。",
+    "default": ""
+  },
+  "bili_cookie": {
+    "type": "string",
+    "description": "B 站完整 Cookie（可选）",
+    "hint": "把浏览器里 bilibili.com 的整段 Cookie 粘进来（至少包含 SESSDATA、buvid3）。填了它字幕和评论区才稳定。",
+    "default": ""
+  },
+  "include_comments": {
+    "type": "bool",
+    "description": "附带评论区热评",
+    "hint": "把该视频按点赞排序的前几条热评一起给模型参考语气，不照抄、不硬玩梗。",
+    "default": true
+  },
+  "max_comments": {
+    "type": "int",
+    "description": "最多几条热评",
+    "hint": "默认 6，最大 10。太多会挤占上下文。",
+    "default": 6
+  },
+  "scan_keywords": {
+    "type": "string",
+    "description": "刷视频的默认关键词",
+    "hint": "多个用逗号分隔。发 /刷视频 不写关键词时用这一组。",
+    "default": "AI拟人,手绘,整活"
+  },
+  "auto_comment_enable": {
+    "type": "bool",
+    "description": "自动评论开关",
+    "hint": "开启后，在允许时段内自动挑一个视频发评论，并 @ 你指定的账号。默认关闭，建议先看清楚再开。",
+    "default": false
+  },
+  "comment_hours": {
+    "type": "string",
+    "description": "允许评论的时段",
+    "hint": "24 小时制，格式 8-21 表示 08:00 到 20:59。",
+    "default": "8-21"
+  },
+  "comment_interval_minutes": {
+    "type": "int",
+    "description": "两次评论的最小间隔（分钟）",
+    "hint": "默认 60，最小 15。不是必须每小时发，只是上限频率。",
+    "default": 60
+  },
+  "min_play": {
+    "type": "int",
+    "description": "自动评论的最低播放量",
+    "hint": "只有播放量达到这个数的视频才可能被评论。默认 10000。",
+    "default": 10000
+  },
+  "comment_target_uid": {
+    "type": "int",
+    "description": "要 @ 的 B 站 UID",
+    "hint": "评论里会 @ 这个账号。填你的 B 站 UID；留 0 表示不 @ 任何人。",
+    "default": 0
+  },
+  "comment_target_name": {
+    "type": "string",
+    "description": "要 @ 的昵称",
+    "hint": "留空会自动按 UID 查昵称。注意昵称要改时这里也要同步，否则 @ 不生效。",
+    "default": ""
+  },
+  "scan_days": {
+    "type": "int",
+    "description": "只看最近几天",
+    "hint": "默认 3 天内的新视频。",
+    "default": 3
+  },
+  "scan_limit": {
+    "type": "int",
+    "description": "每次取几个候选",
+    "hint": "默认 8 个候选交给模型挑 1-3 个。",
+    "default": 8
+  },
+  "block_words": {
+    "type": "string",
+    "description": "屏蔽词",
+    "hint": "标题或简介命中这些词的视频会被直接过滤掉，多个用逗号分隔。",
+    "default": ""
+  },
+  "cache_minutes": {
+    "type": "int",
+    "description": "解析结果缓存时间",
+    "hint": "同一个视频在缓存期内重复发送不会再抓一次。单位：分钟，默认 30。",
+    "default": 30
+  },
+  "enable_draw": {
+    "type": "bool",
+    "description": "允许 Bot 生成图片",
+    "hint": "开启后模型可以调用 draw_avatar 工具，根据描述画头像/插画并直接发到聊天里。用的是免费图床接口（Pollinations），不需要 API Key。",
+    "default": true
+  },
+  "draw_model": {
+    "type": "string",
+    "description": "兜底图床模型（可选）",
+    "hint": "只有没填生图 API Key 时才会用 Pollinations，留空即可。",
+    "default": ""
+  },
+  "draw_size": {
+    "type": "int",
+    "description": "出图边长",
+    "hint": "单位像素，512-1024，默认 1024。",
+    "default": 1024
+  },
+  "image_api_base": {
+    "type": "string",
+    "description": "生图接口地址",
+    "hint": "OpenAI 兼容的 /images/generations 接口。默认智谱：https://open.bigmodel.cn/api/paas/v4",
+    "default": "https://open.bigmodel.cn/api/paas/v4"
+  },
+  "image_api_key": {
+    "type": "string",
+    "description": "生图 API Key",
+    "hint": "填了就优先用这个接口出图。智谱的 CogView-3-Flash 免费；填好后模型就能真正画图并发给用户。",
+    "default": ""
+  },
+  "image_model": {
+    "type": "string",
+    "description": "生图模型",
+    "hint": "智谱可用 cogview-3-flash（免费，带 AI 生成水印）。换付费模型可去水印。",
+    "default": "cogview-3-flash"
+  }
+}
