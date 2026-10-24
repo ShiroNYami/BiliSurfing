@@ -1,4 +1,4 @@
-# BiliSurfing · B站冲浪管理器
+﻿# BiliSurfing · B站冲浪管理器
 
 **让 Bot 真正“看”B 站视频**的 AstrBot 插件：抽帧 + 字幕 + 热评一起注入上下文，而不是只拿到标题和简介。
 
@@ -65,7 +65,7 @@ git clone https://github.com/ShiroNYami/BiliSurfing.git \
 | `scan_keywords` | `/刷视频` 的默认关键词，逗号分隔 |
 | `min_play` | 刷视频/自动评论的最低播放量，默认 10000 |
 | `auto_comment_enable` | 自动评论总开关，默认关闭 |
-| `comment_hours` | 允许自动评论的时段，如 `8-22` |
+| `comment_hours` | 允许自动评论的时段，含结束小时（如 `8-23` 表示到 23:59） |
 | `comment_target_uid` | 评论里 @ 的 B 站 UID，0 表示不 @ |
 | `block_words` | 屏蔽词，命中则不评论、不学习 |
 | `image_api_key` | 生图 API Key（智谱等），留空则用免费图床兜底 |
@@ -161,3 +161,4 @@ B 站对新号、低等级账号的评论会先审核，期间只有自己可见
 ## License
 
 MIT
+
