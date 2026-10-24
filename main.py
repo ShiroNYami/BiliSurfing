@@ -1265,6 +1265,30 @@ class BiliReaderPlugin(Star):
         if added:
             logger.info(f"[bili_reader] 自动学到 {added} 条语气规则")
 
+    async def _restyle_comment(self, text: str) -> str:
+        """手动评论也过一遍语气规则：语气统一，意思不动。"""
+        if not self._get_bool("memory_enable", True) or not self._memories:
+            return text
+        provider = await self.context.get_using_provider_async(self._owner_umo)
+        if not provider:
+            return text
+        rules = "\n".join(f"- {m['text']}" for m in self._memories[-10:])
+        prompt = (
+            f"原评论：{text}\n\n"
+            "按下面的说话习惯改写这条 B 站评论：意思不变、不超过 40 字、不加新信息、"
+            "不 @ 任何人、不带链接。只输出改写后的评论，不要引号。\n"
+            f"说话习惯：\n{rules}"
+        )
+        try:
+            resp = await provider.text_chat(
+                prompt=prompt, system_prompt="你是 B 站评论改写器，只输出一句评论。"
+            )
+        except Exception:  # noqa: BLE001
+            return text
+        new = (resp.completion_text or "").strip().strip('"“”')
+        new = re.sub(r"@\S+\s*", "", new).strip()
+        return new if 2 <= len(new) <= 60 else text
+
     async def _distill_rules(self, comments: list[str]) -> list[str]:
         provider = await self.context.get_using_provider_async(self._owner_umo)
         if not provider:
@@ -1693,6 +1717,10 @@ class BiliReaderPlugin(Star):
         text = " ".join(str(comment or "").split()).strip()
         if not text:
             return "评论内容为空，没有发送。"
+        if any(w in text for w in self._blocked_words()):
+            return "这条评论命中屏蔽词，没有发送。"
+        # 手动评论也过一遍语气规则，保证和自动评论一个嗓子
+        text = await self._restyle_comment(text)
         if any(w in text for w in self._blocked_words()):
             return "这条评论命中屏蔽词，没有发送。"
         now = time.time()
