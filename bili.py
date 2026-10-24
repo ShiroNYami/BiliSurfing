@@ -478,6 +478,41 @@ class BiliClient:
                     return True
         return False
 
+    async def at_items(self) -> list[dict]:
+        """消息中心里「@我的」列表（需要登录 Cookie）。"""
+        payload = await self._json(
+            "https://api.bilibili.com/x/msgfeed/at",
+            {"build": 0, "mobi_app": "web", "platform": "web"},
+        )
+        if payload.get("code") != 0:
+            return []
+        return (payload.get("data") or {}).get("items") or []
+
+    async def reply_comment_aid(
+        self, aid: int, root: str, parent: str, message: str
+    ) -> dict:
+        """按 aid 回复某条评论（楼中楼）。"""
+        csrf = self.csrf
+        if not csrf:
+            raise BiliError("Cookie 里缺少 bili_jct，无法回复")
+        payload = await self._post(
+            "https://api.bilibili.com/x/v2/reply/add",
+            {
+                "type": 1,
+                "oid": int(aid),
+                "root": str(root),
+                "parent": str(parent),
+                "message": message,
+                "plat": 1,
+                "csrf": csrf,
+            },
+        )
+        if payload.get("code") != 0:
+            raise BiliError(
+                f"回复失败：{payload.get('message')}（code {payload.get('code')}）"
+            )
+        return payload.get("data") or {}
+
     async def download(self, url: str, dest_path: str, max_bytes: int) -> str:
         """流式下载视频，超过上限立即中断。"""
         await self._prepare()

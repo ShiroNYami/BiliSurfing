@@ -175,6 +175,8 @@ class BiliReaderPlugin(Star):
         self._last_manual_comment: float = 0.0
         self._last_check: dict = {}
         self._log_prune_ts: float = 0.0
+        self._at_state: dict = self._load_at_state()
+        self._at_last_poll: float = 0.0
         self._register_webui()
         try:
             self._maybe_prune_logs()
@@ -863,6 +865,116 @@ class BiliReaderPlugin(Star):
                 f"{info.title}\n{info.url}"
             )
 
+    def _at_state_file(self) -> str:
+        return os.path.join(self._data_dir, "at_state.json")
+
+    def _load_at_state(self) -> dict:
+        try:
+            with open(self._at_state_file(), encoding="utf-8") as fp:
+                data = json.load(fp)
+            return data if isinstance(data, dict) else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _save_at_state(self) -> None:
+        try:
+            with open(self._at_state_file(), "w", encoding="utf-8") as fp:
+                json.dump(self._at_state, fp, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _maybe_at_reply(self) -> None:
+        """轮询「@我的」，只回复指定 UID 的 @，每天有上限。"""
+        if not self._get_bool("at_reply_enable", False):
+            return
+        target = self._get_int("at_target_uid", 0)
+        if not target:
+            return
+        now = time.time()
+        if now - self._at_last_poll < max(1, self._get_int("at_poll_minutes", 5)) * 60:
+            return
+        self._at_last_poll = now
+
+        today = time.strftime("%Y-%m-%d")
+        if self._at_state.get("day") != today:
+            self._at_state["day"] = today
+            self._at_state["count"] = 0
+        if int(self._at_state.get("count") or 0) >= max(1, self._get_int("at_daily_max", 10)):
+            return
+
+        client = BiliClient(
+            cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
+        )
+        try:
+            items = await client.at_items()
+            last_id = int(self._at_state.get("last_id") or 0)
+            if last_id == 0 and items:
+                # 首次运行只标记当前位置，避免把历史 @ 全部回复一遍
+                self._at_state["last_id"] = max(int(x.get("id") or 0) for x in items)
+                self._save_at_state()
+                logger.info("[bili_reader] 首次记录 @ 游标，跳过历史消息")
+                return
+            fresh = [
+                it
+                for it in items
+                if int(it.get("id") or 0) > last_id
+                and str((it.get("user") or {}).get("mid")) == str(target)
+            ]
+            if not fresh:
+                return
+            fresh.sort(key=lambda x: int(x.get("id") or 0))
+            for item in fresh:
+                self._at_state["last_id"] = int(item.get("id") or 0)
+                await self._handle_at(item, client)
+                self._save_at_state()
+        finally:
+            await client.close()
+
+    async def _handle_at(self, item: dict, client: BiliClient) -> None:
+        info = item.get("item") or {}
+        oid = info.get("subject_id") or info.get("oid")
+        rpid = info.get("target_id") or info.get("root_id")
+        message = ((item.get("reply") or {}).get("content") or {}).get("message") or ""
+        if not oid or not rpid:
+            logger.info(
+                "[bili_reader] @记录字段不全，跳过："
+                + json.dumps(item, ensure_ascii=False)[:300]
+            )
+            return
+
+        provider = await self.context.get_using_provider_async(self._owner_umo or None)
+        reply = ""
+        if provider:
+            prompt = (
+                f"有人在 B 站视频的评论区 @ 了你，说：{message[:200]}\n"
+                "请写一句不超过 30 字的回复：口语、友好，可以带一点轻松调侃；"
+                "不要提 AI、机器人、自动、插件；不要涉及政治、色情、引战、广告。"
+                "只输出回复本身，不要引号。"
+            )
+            try:
+                resp = await provider.text_chat(
+                    prompt=prompt,
+                    system_prompt="你是 B 站上的普通用户，回复只有一句话。",
+                )
+                reply = (resp.completion_text or "").strip().strip('"“”')
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[bili_reader] 生成 @ 回复失败：{exc}")
+        if not reply:
+            return
+        if any(w in reply for w in self._blocked_words()):
+            return
+        try:
+            data = await client.reply_comment_aid(int(oid), str(rpid), str(rpid), reply[:500])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 回复 @ 失败：{exc}")
+            return
+        self._at_state["count"] = int(self._at_state.get("count") or 0) + 1
+        await self._send_owner(
+            f"有人在视频评论区 @ 你，已回复：{reply}\n"
+            f"https://www.bilibili.com/video/av{oid}#reply{rpid}"
+        )
+        logger.info(f"[bili_reader] 已回复 @，rpid={data.get('rpid')}")
+
     def _ensure_comment_task(self) -> None:
         if self._comment_task is None or self._comment_task.done():
             self._comment_task = asyncio.create_task(self._comment_loop())
@@ -876,6 +988,12 @@ class BiliReaderPlugin(Star):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[bili_reader] 自动评论异常：{exc}")
+            try:
+                await self._maybe_at_reply()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[bili_reader] @回复异常：{exc}")
             try:
                 await self._maybe_learn()
             except asyncio.CancelledError:

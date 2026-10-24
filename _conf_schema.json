@@ -173,6 +173,30 @@
     "hint": "每天清理一次 AstrBot 日志目录里超过这个天数的文件，默认 15 天。Docker 自身的 json 日志已由 compose 限制为 10MB×3，不在此范围。",
     "default": 15
   },
+  "at_reply_enable": {
+    "type": "bool",
+    "description": "监听视频评论区 @ 并回复",
+    "hint": "定时查「@我的」，只回复 at_target_uid 指定的账号，每天最多 at_daily_max 条。默认关闭。",
+    "default": false
+  },
+  "at_target_uid": {
+    "type": "int",
+    "description": "允许触发回复的 B 站 UID",
+    "hint": "只有这个 UID 在评论区 @ 小号时才会自动回复；填 0 表示不启用。",
+    "default": 0
+  },
+  "at_poll_minutes": {
+    "type": "int",
+    "description": "@ 检查间隔（分钟）",
+    "hint": "默认 5 分钟查一次消息中心，一次一个请求。",
+    "default": 5
+  },
+  "at_daily_max": {
+    "type": "int",
+    "description": "@ 回复每天上限",
+    "hint": "默认 10 条，防止被刷。",
+    "default": 10
+  },
   "enable_draw": {
     "type": "bool",
     "description": "允许 Bot 生成图片",
