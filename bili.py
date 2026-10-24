@@ -460,6 +460,24 @@ class BiliClient:
         )
         return payload.get("code") == 0
 
+    async def find_comment(
+        self, info: VideoInfo, rpid: str = "", mid: str = "", pages: int = 5
+    ) -> bool:
+        """在公开评论列表里找自己的评论（按时间倒序翻几页）。"""
+        for pn in range(1, max(1, pages) + 1):
+            payload = await self._json(
+                "https://api.bilibili.com/x/v2/reply",
+                {"type": 1, "oid": info.aid, "pn": pn, "ps": 49, "sort": 0},
+            )
+            if payload.get("code") != 0:
+                return False
+            for reply in (payload.get("data") or {}).get("replies") or []:
+                if rpid and str(reply.get("rpid")) == str(rpid):
+                    return True
+                if mid and str((reply.get("member") or {}).get("mid")) == str(mid):
+                    return True
+        return False
+
     async def download(self, url: str, dest_path: str, max_bytes: int) -> str:
         """流式下载视频，超过上限立即中断。"""
         await self._prepare()

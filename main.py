@@ -832,6 +832,37 @@ class BiliReaderPlugin(Star):
             logger.warning(f"[bili_reader] 私聊通知发送失败：{exc}")
             return False
 
+    def _self_mid(self) -> str:
+        cookie = self._get_str("bili_cookie", "")
+        for part in cookie.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "DedeUserID":
+                return value.strip()
+        return ""
+
+    async def _verify_comment(self, info: VideoInfo, rpid: str) -> None:
+        """发完 10 分钟回查一次公开列表，只查一次，不轮询。"""
+        await asyncio.sleep(600)
+        client = BiliClient(
+            cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
+        )
+        try:
+            found = await client.find_comment(
+                info, rpid=str(rpid), mid=self._self_mid()
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 评论回查失败：{exc}")
+            return
+        finally:
+            await client.close()
+        if found:
+            await self._send_owner(f"评论已公开：{info.title}\n{info.url}")
+        else:
+            await self._send_owner(
+                "评论发出 10 分钟后仍不在公开列表，大概率在审核（仅自己可见）："
+                f"{info.title}\n{info.url}"
+            )
+
     def _ensure_comment_task(self) -> None:
         if self._comment_task is None or self._comment_task.done():
             self._comment_task = asyncio.create_task(self._comment_loop())
@@ -954,6 +985,8 @@ class BiliReaderPlugin(Star):
                     "comment", info.bvid, info.title, int(it.get("play") or 0), comment, info.url
                 )
                 self._note_check("已评论", f"{info.bvid}《{info.title[:20]}》rpid={rpid}")
+                if rpid:
+                    asyncio.create_task(self._verify_comment(info, rpid))
                 logger.info(
                     f"[bili_reader] 已评论 {info.bvid} rpid={rpid} 提到={len(members)} 条"
                 )
