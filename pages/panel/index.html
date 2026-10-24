@@ -136,10 +136,30 @@ function renderMemories(list){
 function renderHistory(list){
   const box = document.getElementById("history");
   if(!list.length){box.innerHTML = '<div class="muted">还没有记录。</div>';return;}
-  box.innerHTML = '<table><tr><th>时间</th><th>类型</th><th>视频</th><th>内容</th></tr>' +
-    list.map(h=>`<tr><td>${h.time}</td><td>${h.kind==='comment'?'评论':'浏览'}</td>
-      <td><a href="${h.url}" target="_blank">${escapeHtml(h.title||h.bvid)}</a><div class="muted">${h.play?('播放 '+h.play):''}</div></td>
+  box.innerHTML = '<table><tr><th>时间</th><th>类型</th><th>视频（点标题复制链接）</th><th>内容</th></tr>' +
+    list.map(h=>`<tr><td>${h.time}</td><td>${h.kind==='comment'?'评论':(h.kind==='reply'?'回复':'浏览')}</td>
+      <td><a href="${h.url}" title="点击复制：${h.url}" onclick="return copyLink('${h.url}')">${escapeHtml(h.title||h.bvid)}</a><div class="muted">${h.play?('播放 '+h.play):''}</div></td>
       <td>${escapeHtml(h.comment||"")}</td></tr>`).join("") + '</table>';
+}
+function copyLink(url){
+  const done = () => toast("链接已复制，粘贴到浏览器打开");
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = url;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); }
+    catch (e) { toast("复制失败，链接：" + url); }
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
+  return false;
 }
 function escapeHtml(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 async function saveConfig(){
