@@ -166,7 +166,6 @@ class BiliReaderPlugin(Star):
         self._data_dir = base
         self._memories: list[dict] = self._load_memories()
         self._owner_umo: str = self._load_owner_umo()
-        self._owner_umo_fallback: str = self._load_owner_fallback()
         self._comment_state: dict = self._load_comment_state()
         self._comment_task: asyncio.Task | None = None
         self._history: list[dict] = self._load_history()
@@ -385,13 +384,11 @@ class BiliReaderPlugin(Star):
             new_umo = event.unified_msg_origin
         except Exception:  # noqa: BLE001
             return
-        # 优先把通知发到私聊；只有没有私聊会话时才退回群聊
-        if "FriendMessage" in new_umo:
-            self._owner_umo = new_umo
-        else:
-            self._owner_umo_fallback = new_umo
-            if not self._owner_umo or "FriendMessage" not in self._owner_umo:
-                self._owner_umo = new_umo
+        # 通知只走私聊：群里说话不记录会话
+        if "FriendMessage" not in new_umo:
+            self._ensure_comment_task()
+            return
+        self._owner_umo = new_umo
         self._save_owner_umo()
         self._ensure_comment_task()
 
@@ -441,35 +438,14 @@ class BiliReaderPlugin(Star):
         lines = [f"#{m['id']} {m['text']}" for m in self._memories]
         yield event.plain_result("现在的长期记忆：\n" + "\n".join(lines))
 
-    @filter.command("测试通知", desc="测试自动评论通知会发到哪个会话（仅主人）")
+    @filter.command("测试通知", desc="测试自动评论通知能否发到私聊（仅主人）")
     async def test_notify_cmd(self, event: AstrMessageEvent):
         if not self._is_owner(event):
             yield event.plain_result("这条只认主人哦。")
             return
-        sent = False
-        try:
-            sent = bool(
-                await self.context.send_message(
-                    self._owner_umo, MessageChain([Plain("测试通知：自动评论结果会发到这里")])
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[bili_reader] 测试通知失败：{exc}")
-        if not sent and self._owner_umo_fallback:
-            try:
-                await self.context.send_message(
-                    self._owner_umo_fallback,
-                    MessageChain([Plain("测试通知（备用会话）：自动评论结果会发到这里")]),
-                )
-                yield event.plain_result(
-                    f"主会话发送失败，已改发备用会话：{self._owner_umo_fallback}"
-                )
-                return
-            except Exception as exc:  # noqa: BLE001
-                yield event.plain_result(f"主会话和备用会话都失败：{exc}")
-                return
+        sent = await self._send_owner("测试通知：自动评论结果会私聊发到这里")
         yield event.plain_result(
-            ("已发送到：" if sent else "发送失败：") + self._owner_umo
+            "已私聊发送" if sent else f"私聊发送失败，当前会话：{self._owner_umo or '未记录'}"
         )
 
     async def _tool_remember(self, event: AstrMessageEvent, text: str) -> str:
@@ -816,22 +792,10 @@ class BiliReaderPlugin(Star):
         except Exception:  # noqa: BLE001
             return ""
 
-    def _load_owner_fallback(self) -> str:
-        try:
-            with open(self._owner_file(), encoding="utf-8") as fp:
-                data = json.load(fp)
-            return str(data.get("fallback") or "")
-        except Exception:  # noqa: BLE001
-            return ""
-
     def _save_owner_umo(self) -> None:
         try:
             with open(self._owner_file(), "w", encoding="utf-8") as fp:
-                json.dump(
-                    {"umo": self._owner_umo, "fallback": self._owner_umo_fallback},
-                    fp,
-                    ensure_ascii=False,
-                )
+                json.dump({"umo": self._owner_umo}, fp, ensure_ascii=False)
         except Exception:  # noqa: BLE001
             pass
 
@@ -850,6 +814,23 @@ class BiliReaderPlugin(Star):
         if changed or now - float(prev.get("logged_at") or 0) >= 1800:
             logger.info(f"[bili_reader] 自动评论检查：{result}{('｜' + detail) if detail else ''}")
             self._last_check["logged_at"] = now
+
+    async def _send_owner(self, text: str) -> bool:
+        """只发私聊；没有私聊会话就不发，绝不退群。"""
+        if not self._owner_umo or "FriendMessage" not in self._owner_umo:
+            logger.info(
+                "[bili_reader] 没有私聊会话，通知跳过（私聊 Bot 发一条消息即可建立）"
+            )
+            return False
+        try:
+            return bool(
+                await self.context.send_message(
+                    self._owner_umo, MessageChain([Plain(text)])
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 私聊通知发送失败：{exc}")
+            return False
 
     def _ensure_comment_task(self) -> None:
         if self._comment_task is None or self._comment_task.done():
@@ -977,23 +958,7 @@ class BiliReaderPlugin(Star):
                     f"[bili_reader] 已评论 {info.bvid} rpid={rpid} 提到={len(members)} 条"
                 )
                 text = f"在《{info.title}》评论了：{comment}\n{info.url}"
-                sent = False
-                try:
-                    sent = bool(
-                        await self.context.send_message(
-                            self._owner_umo, MessageChain([Plain(text)])
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(f"[bili_reader] 评论通知发送失败：{exc}")
-                if not sent and self._owner_umo_fallback and self._owner_umo_fallback != self._owner_umo:
-                    try:
-                        await self.context.send_message(
-                            self._owner_umo_fallback, MessageChain([Plain(text)])
-                        )
-                        logger.info("[bili_reader] 通知已改发到备用会话")
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(f"[bili_reader] 备用会话通知也失败：{exc}")
+                await self._send_owner(text)
                 return
 
             self._note_check(
