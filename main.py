@@ -570,8 +570,14 @@ class BiliReaderPlugin(Star):
                 "config": self._public_config(),
                 "status": {
                     "now": time.strftime("%Y-%m-%d %H:%M"),
-                    "window": f"{start_hour}:00-{end_hour}:00",
-                    "in_window": start_hour <= time.localtime().tm_hour <= end_hour,
+                    "window": (
+                        f"{start_hour}:00-{end_hour}:59"
+                        if start_hour <= end_hour
+                        else f"{start_hour}:00-次日{end_hour}:59"
+                    ),
+                    "in_window": self._hour_in_window(
+                        start_hour, end_hour, time.localtime().tm_hour
+                    ),
                     "last_comment": time.strftime("%Y-%m-%d %H:%M", time.localtime(last))
                     if last
                     else "",
@@ -699,7 +705,7 @@ class BiliReaderPlugin(Star):
 
     def _comment_window(self) -> tuple[int, int]:
         raw = (
-            self._get_str("comment_hours", "8-21")
+            self._get_str("comment_hours", "8-23")
             .replace("：", "-")
             .replace("~", "-")
             .replace("—", "-")
@@ -708,7 +714,14 @@ class BiliReaderPlugin(Star):
             start, end = raw.split("-")
             return max(0, int(start)), min(24, int(end))
         except Exception:  # noqa: BLE001
-            return 8, 21
+            return 8, 23
+
+    @staticmethod
+    def _hour_in_window(start: int, end: int, hour: int) -> bool:
+        """判断当前小时是否在时段内；start > end 表示跨凌晨。"""
+        if start <= end:
+            return start <= hour <= end
+        return hour >= start or hour <= end
 
     def _blocked_words(self) -> list[str]:
         raw = self._get_str("block_words", "").replace("，", ",")
@@ -739,7 +752,7 @@ class BiliReaderPlugin(Star):
         if not self._get_bool("auto_comment_enable", False) or not self._owner_umo:
             return
         start_hour, end_hour = self._comment_window()
-        if not (start_hour <= time.localtime().tm_hour <= end_hour):
+        if not self._hour_in_window(start_hour, end_hour, time.localtime().tm_hour):
             return
         interval = max(15, self._get_int("comment_interval_minutes", 60)) * 60
         if time.time() - float(self._comment_state.get("last_ts") or 0) < interval:

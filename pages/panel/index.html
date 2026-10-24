@@ -38,7 +38,7 @@ th{color:var(--sub);font-weight:500}
     <h3 style="margin:0 0 10px">冲浪配置</h3>
     <div class="row">
       <div class="field"><label>关键词（逗号分隔）</label><input id="scan_keywords"></div>
-      <div class="field"><label>浏览时段（8-23 = 到 23:59）</label><input id="comment_hours"></div>
+      <div class="field"><label>浏览时段（8-23；跨凌晨写 22-6）</label><input id="comment_hours"></div>
     </div>
     <div class="row" style="margin-top:10px">
       <div class="field"><label>评论最小间隔（分钟）</label><input id="comment_interval_minutes" type="number"></div>
@@ -138,8 +138,15 @@ function renderHistory(list){
   if(!list.length){box.innerHTML = '<div class="muted">还没有记录。</div>';return;}
   box.innerHTML = '<table><tr><th>时间</th><th>类型</th><th>视频（点标题复制链接）</th><th>内容</th></tr>' +
     list.map(h=>`<tr><td>${h.time}</td><td>${h.kind==='comment'?'评论':(h.kind==='reply'?'回复':'浏览')}</td>
-      <td><a href="${h.url}" title="点击复制：${h.url}" onclick="return copyLink('${h.url}')">${escapeHtml(h.title||h.bvid)}</a><div class="muted">${h.play?('播放 '+h.play):''}</div></td>
+      <td><a href="${h.url}" target="_blank" title="${h.url}" onclick="return openLink('${h.url}')">${escapeHtml(h.title||h.bvid)}</a><div class="muted">${h.play?('播放 '+h.play):''}</div></td>
       <td>${escapeHtml(h.comment||"")}</td></tr>`).join("") + '</table>';
+}
+function openLink(url){
+  // 面板在 iframe 里：允许弹窗时直接开新标签，否则退回复制链接
+  let w = null;
+  try { w = window.open(url, "_blank", "noopener"); } catch (e) { w = null; }
+  if (!w) { copyLink(url); }
+  return false;
 }
 function copyLink(url){
   const done = () => toast("链接已复制，粘贴到浏览器打开");

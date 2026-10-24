@@ -1,4 +1,4 @@
-﻿# BiliSurfing · B站冲浪管理器
+# BiliSurfing · B站冲浪管理器
 
 **让 Bot 真正“看”B 站视频**的 AstrBot 插件：抽帧 + 字幕 + 热评一起注入上下文，而不是只拿到标题和简介。
 
@@ -134,6 +134,16 @@ B 站对新号、低等级账号的评论会先审核，期间只有自己可见
 
 **Q：需要给插件单独开端口吗？**
 不需要。面板是 AstrBot 进程内的页面与接口，复用 WebUI 端口。
+
+**Q：面板里点视频标题，为什么有时候不开新标签？**
+AstrBot 给插件页 iframe 的 `sandbox` 默认不含 `allow-popups`，浏览器会拦掉 `target="_blank"`。
+插件会先尝试开新标签，被拦时自动退回复制链接。想直接开新标签，可在宿主机执行一次：
+
+```bash
+bash scripts/patch-dashboard-popups.sh astrbot
+```
+
+它会给 AstrBot dashboard 的 iframe 补上 `allow-popups`（属于对宿主静态资源的修改，升级/重建容器后需重新执行）。
 
 **Q：支持抖音 / YouTube 吗？**
 暂不支持。YouTube 在国内机器通常也不通，插件只做 B 站。
