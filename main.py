@@ -933,8 +933,13 @@ class BiliReaderPlugin(Star):
     async def _handle_at(self, item: dict, client: BiliClient) -> None:
         info = item.get("item") or {}
         oid = info.get("subject_id") or info.get("oid")
-        rpid = info.get("target_id") or info.get("root_id")
-        message = ((item.get("reply") or {}).get("content") or {}).get("message") or ""
+        # B 站 @ 消息里，被 @ 的那条评论 rpid 在 source_id；root_id/target_id 为 0
+        rpid = info.get("source_id") or info.get("target_id") or info.get("root_id")
+        message = (
+            info.get("source_content")
+            or ((item.get("reply") or {}).get("content") or {}).get("message")
+            or ""
+        )
         if not oid or not rpid:
             logger.info(
                 "[bili_reader] @记录字段不全，跳过："
