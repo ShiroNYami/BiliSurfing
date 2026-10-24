@@ -1,4 +1,4 @@
-{
+﻿{
   "enable": {
     "type": "bool",
     "description": "启用视频阅读",
@@ -188,8 +188,8 @@
   "at_poll_minutes": {
     "type": "int",
     "description": "@ 检查间隔（分钟）",
-    "hint": "默认 5 分钟查一次消息中心，一次一个请求。",
-    "default": 5
+    "hint": "默认 10 分钟查一次消息中心，一次一个请求。",
+    "default": 10
   },
   "at_daily_max": {
     "type": "int",
@@ -234,3 +234,5 @@
     "default": "cogview-3-flash"
   }
 }
+
+
