@@ -1,4 +1,4 @@
-﻿{
+{
   "enable": {
     "type": "bool",
     "description": "启用视频阅读",
@@ -16,6 +16,12 @@
     "description": "启用长期记忆",
     "hint": "开启后，用 /记住 教它的规则会写进每次请求，跨会话持久生效；用 /记忆 查看、/忘记 删除。",
     "default": true
+  },
+  "inject_memory_in_chat": {
+    "type": "bool",
+    "description": "把语气规则注入日常聊天",
+    "hint": "默认关闭。关闭时语气规则只在「插件自动发评论」时参考，不再混进 QQ 聊天，避免 B 站热评腔调把人格带偏。想恢复全局注入再打开。",
+    "default": false
   },
   "auto_learn_enable": {
     "type": "bool",
@@ -234,5 +240,4 @@
     "default": "cogview-3-flash"
   }
 }
-
 

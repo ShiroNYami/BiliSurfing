@@ -272,6 +272,10 @@ class BiliReaderPlugin(Star):
 
     @filter.on_llm_request()
     async def inject_memories(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        # 语气规则默认只用于「插件自己发评论」，不再注入日常聊天。
+        # B 站热评学来的腔调是实验性的，混进 QQ 聊天会把人格带偏。
+        if not self._get_bool("inject_memory_in_chat", False):
+            return
         if not self._get_bool("memory_enable", True) or not self._memories:
             return
         marker = "【长期记忆·用户教过你的规则】"
@@ -1138,6 +1142,9 @@ class BiliReaderPlugin(Star):
             "可以夸一句或提一个细节。不要提 AI、机器人、自动、插件，不要用 @，"
             "不要涉及政治、色情、暴力、引战、广告、抽奖。只输出评论本身，不要引号。"
         )
+        if self._get_bool("memory_enable", True) and self._memories:
+            rules = "\n".join(f"- {m['text']}" for m in self._memories[-20:])
+            prompt += f"\n\n【平时攒下的说话习惯，参考语气，别照念】\n{rules}"
         try:
             resp = await provider.text_chat(
                 prompt=prompt,
