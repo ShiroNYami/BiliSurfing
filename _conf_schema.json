@@ -116,8 +116,8 @@
   "comment_hours": {
     "type": "string",
     "description": "允许评论的时段",
-    "hint": "24 小时制，格式 8-21 表示 08:00 到 20:59。",
-    "default": "8-21"
+    "hint": "24 小时制，含结束小时：8-23 表示 08:00 到 23:59；8-22 表示 08:00 到 22:59。",
+    "default": "8-23"
   },
   "comment_interval_minutes": {
     "type": "int",

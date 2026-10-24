@@ -571,7 +571,7 @@ class BiliReaderPlugin(Star):
                 "status": {
                     "now": time.strftime("%Y-%m-%d %H:%M"),
                     "window": f"{start_hour}:00-{end_hour}:00",
-                    "in_window": start_hour <= time.localtime().tm_hour < end_hour,
+                    "in_window": start_hour <= time.localtime().tm_hour <= end_hour,
                     "last_comment": time.strftime("%Y-%m-%d %H:%M", time.localtime(last))
                     if last
                     else "",
@@ -739,7 +739,7 @@ class BiliReaderPlugin(Star):
         if not self._get_bool("auto_comment_enable", False) or not self._owner_umo:
             return
         start_hour, end_hour = self._comment_window()
-        if not (start_hour <= time.localtime().tm_hour < end_hour):
+        if not (start_hour <= time.localtime().tm_hour <= end_hour):
             return
         interval = max(15, self._get_int("comment_interval_minutes", 60)) * 60
         if time.time() - float(self._comment_state.get("last_ts") or 0) < interval:
