@@ -167,6 +167,12 @@
     "hint": "同一个视频在缓存期内重复发送不会再抓一次。单位：分钟，默认 30。",
     "default": 30
   },
+  "log_retention_days": {
+    "type": "int",
+    "description": "日志保留天数",
+    "hint": "每天清理一次 AstrBot 日志目录里超过这个天数的文件，默认 15 天。Docker 自身的 json 日志已由 compose 限制为 10MB×3，不在此范围。",
+    "default": 15
+  },
   "enable_draw": {
     "type": "bool",
     "description": "允许 Bot 生成图片",

@@ -116,7 +116,8 @@ async function load(){
     `<div class="field"><label>状态</label><div><span class="tag ${s.in_window?'':'off'}">${s.in_window?'在时段内':'不在时段'}</span> <span class="muted">${s.window}</span></div></div>
      <div class="field"><label>上次评论</label><div>${s.last_comment||"还没评论过"}</div></div>
      <div class="field"><label>下次可评论</label><div>${s.next_allowed||"-"}</div></div>
-     <div class="field"><label>已评论视频</label><div>${s.commented_count} 个</div></div>`;
+     <div class="field"><label>已评论视频</label><div>${s.commented_count} 个</div></div>
+     <div class="field" style="flex:2 1 320px"><label>最近一次检查</label><div>${s.last_check?(`${escapeHtml(s.last_check)} <span class="muted">${escapeHtml(s.last_check_at||"")}</span><br><span class="muted">${escapeHtml(s.last_check_detail||"")}</span>`):"还没检查过"}</div></div>`;
   const c = STATE.config;
   for(const k of ["scan_keywords","comment_hours","comment_interval_minutes","min_play","comment_target_uid","comment_target_name","block_words"]){
     const el = document.getElementById(k);

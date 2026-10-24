@@ -1,4 +1,4 @@
-﻿# BiliSurfing · B站冲浪管理器
+# BiliSurfing · B站冲浪管理器
 
 **让 Bot 真正“看”B 站视频**的 AstrBot 插件：抽帧 + 字幕 + 热评一起注入上下文，而不是只拿到标题和简介。
 
@@ -69,6 +69,7 @@ git clone https://github.com/ShiroNYami/BiliSurfing.git \
 | `comment_target_uid` | 评论里 @ 的 B 站 UID，0 表示不 @ |
 | `block_words` | 屏蔽词，命中则不评论、不学习 |
 | `image_api_key` | 生图 API Key（智谱等），留空则用免费图床兜底 |
+| `log_retention_days` | 日志保留天数，默认 15，每天清理一次 AstrBot 日志目录（Docker 自身日志由 compose 限制为 10MB×3） |
 
 ### 5. 用起来
 

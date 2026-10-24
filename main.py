@@ -165,7 +165,7 @@ class BiliReaderPlugin(Star):
         self._draw_last: dict[str, float] = {}
         self._data_dir = base
         self._memories: list[dict] = self._load_memories()
-        self._owner_umo: str = ""
+        self._owner_umo: str = self._load_owner_umo()
         self._comment_state: dict = self._load_comment_state()
         self._comment_task: asyncio.Task | None = None
         self._history: list[dict] = self._load_history()
@@ -173,7 +173,18 @@ class BiliReaderPlugin(Star):
         self._last_video: dict[str, VideoInfo] = {}
         self._last_comments: dict[str, list[dict]] = {}
         self._last_manual_comment: float = 0.0
+        self._last_check: dict = {}
+        self._log_prune_ts: float = 0.0
         self._register_webui()
+        try:
+            self._maybe_prune_logs()
+        except Exception:  # noqa: BLE001
+            pass
+        if self._owner_umo:
+            try:
+                self._ensure_comment_task()
+            except Exception:  # noqa: BLE001
+                pass
         global PLUGIN
         PLUGIN = self
 
@@ -373,6 +384,7 @@ class BiliReaderPlugin(Star):
             self._owner_umo = event.unified_msg_origin
         except Exception:  # noqa: BLE001
             return
+        self._save_owner_umo()
         self._ensure_comment_task()
 
     @filter.command("记住", alias={"记一下"}, desc="让 Bot 记住一条长期规则（仅主人）")
@@ -587,6 +599,9 @@ class BiliReaderPlugin(Star):
                     if last
                     else "",
                     "commented_count": len(self._comment_state.get("commented") or []),
+                    "last_check": self._last_check.get("result", ""),
+                    "last_check_at": self._last_check.get("time", ""),
+                    "last_check_detail": self._last_check.get("detail", ""),
                 },
                 "history": list(reversed(self._history[-100:])),
                 "memories": self._memories,
@@ -727,6 +742,64 @@ class BiliReaderPlugin(Star):
         raw = self._get_str("block_words", "").replace("，", ",")
         return [w.strip() for w in raw.split(",") if w.strip()]
 
+    def _maybe_prune_logs(self) -> None:
+        """每天最多一次，清理 AstrBot 日志目录里超过保留期的文件。"""
+        now = time.time()
+        if now - float(getattr(self, "_log_prune_ts", 0) or 0) < 86400:
+            return
+        self._log_prune_ts = now
+        days = max(1, self._get_int("log_retention_days", 15))
+        root = os.path.join(get_astrbot_data_path(), "logs")
+        cutoff = now - days * 86400
+        removed = 0
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                path = os.path.join(dirpath, name)
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                        removed += 1
+                except OSError:
+                    continue
+        if removed:
+            logger.info(
+                f"[bili_reader] 清理了 {removed} 个超过 {days} 天的日志文件（{root}）"
+            )
+
+    def _owner_file(self) -> str:
+        return os.path.join(self._data_dir, "owner.json")
+
+    def _load_owner_umo(self) -> str:
+        try:
+            with open(self._owner_file(), encoding="utf-8") as fp:
+                data = json.load(fp)
+            return str(data.get("umo") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _save_owner_umo(self) -> None:
+        try:
+            with open(self._owner_file(), "w", encoding="utf-8") as fp:
+                json.dump({"umo": self._owner_umo}, fp, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _note_check(self, result: str, detail: str = "") -> None:
+        """记录一次自动评论检查的结果，便于在面板/日志里看“卡在哪一步”。"""
+        now = time.time()
+        prev = self._last_check or {}
+        changed = prev.get("result") != result
+        self._last_check = {
+            "ts": now,
+            "time": time.strftime("%m-%d %H:%M", time.localtime(now)),
+            "result": result,
+            "detail": detail,
+        }
+        # 结果变化时立即记一条；否则每 30 分钟记一次，避免刷屏
+        if changed or now - float(prev.get("logged_at") or 0) >= 1800:
+            logger.info(f"[bili_reader] 自动评论检查：{result}{('｜' + detail) if detail else ''}")
+            self._last_check["logged_at"] = now
+
     def _ensure_comment_task(self) -> None:
         if self._comment_task is None or self._comment_task.done():
             self._comment_task = asyncio.create_task(self._comment_loop())
@@ -746,16 +819,31 @@ class BiliReaderPlugin(Star):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[bili_reader] 语气学习异常：{exc}")
+            try:
+                self._maybe_prune_logs()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[bili_reader] 清理日志失败：{exc}")
             await asyncio.sleep(300)
 
     async def _maybe_comment(self) -> None:
-        if not self._get_bool("auto_comment_enable", False) or not self._owner_umo:
+        if not self._get_bool("auto_comment_enable", False):
+            self._note_check("开关关闭", "在面板/配置里打开「自动评论」后才会跑")
+            return
+        if not self._owner_umo:
+            self._note_check("没有会话", "主人先在 QQ 里发一条消息，才能把通知推给你")
             return
         start_hour, end_hour = self._comment_window()
-        if not self._hour_in_window(start_hour, end_hour, time.localtime().tm_hour):
+        hour = time.localtime().tm_hour
+        if not self._hour_in_window(start_hour, end_hour, hour):
+            self._note_check("不在时段", f"当前 {hour} 点，时段 {start_hour}-{end_hour}")
             return
         interval = max(15, self._get_int("comment_interval_minutes", 60)) * 60
-        if time.time() - float(self._comment_state.get("last_ts") or 0) < interval:
+        gap = time.time() - float(self._comment_state.get("last_ts") or 0)
+        if gap < interval:
+            nxt = time.strftime(
+                "%H:%M", time.localtime(time.time() + (interval - gap))
+            )
+            self._note_check("距上次评论太近", f"最早 {nxt} 才会再发")
             return
 
         keywords = [
@@ -768,33 +856,57 @@ class BiliReaderPlugin(Star):
         keyword = random.choice(keywords or ["AI"])
         blocked = self._blocked_words()
         done = set(self._comment_state.get("commented") or [])
+        min_play = self._get_int("min_play", 10000)
+        days = max(1, self._get_int("scan_days", 3))
 
         client = BiliClient(
             cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
         )
         try:
-            items = await client.search_videos(
-                keyword,
-                limit=8,
-                days=3,
-                max_seconds=900,
-                min_play=self._get_int("min_play", 10000),
-            )
+            items: list[dict] = []
+            tried: list[str] = []
+            # 一次最多试 3 个关键词，避免抽到冷门词就整轮放弃
+            for kw in random.sample(keywords or ["AI"], min(3, max(1, len(keywords)))):
+                tried.append(kw)
+                items = await client.search_videos(
+                    kw,
+                    limit=8,
+                    days=days,
+                    max_seconds=900,
+                    min_play=min_play,
+                )
+                if items:
+                    keyword = kw
+                    break
+            if not items:
+                self._note_check(
+                    "没有候选视频",
+                    f"试了 {'/'.join(tried)}，近 {days} 天播放≥{min_play} 的视频 0 个",
+                )
+                return
             items = [
                 it
                 for it in items
                 if it["bvid"] not in done
                 and not any(w in (it["title"] + it["desc"]) for w in blocked)
             ]
+            if not items:
+                self._note_check("候选都被过滤", "都评论过，或命中屏蔽词")
+                return
+
+            no_sub = 0
+            no_comment = 0
             for it in items[:6]:
                 info = await client.video_info(
                     f"https://www.bilibili.com/video/{it['bvid']}"
                 )
                 subs = await client.subtitles(info)
                 if not subs:
+                    no_sub += 1
                     continue
                 comment = await self._make_comment(info, subs)
                 if not comment:
+                    no_comment += 1
                     continue
                 target = self._get_str("comment_target_name", "") or await client.user_name(
                     self._get_int("comment_target_uid", 0)
@@ -809,6 +921,7 @@ class BiliReaderPlugin(Star):
                 self._record_history(
                     "comment", info.bvid, info.title, int(it.get("play") or 0), comment, info.url
                 )
+                self._note_check("已评论", f"{info.bvid}《{info.title[:20]}》rpid={rpid}")
                 logger.info(
                     f"[bili_reader] 已评论 {info.bvid} rpid={rpid} 提到={len(members)} 条"
                 )
@@ -820,6 +933,13 @@ class BiliReaderPlugin(Star):
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"[bili_reader] 评论通知发送失败：{exc}")
                 return
+
+            self._note_check(
+                "候选不合适",
+                f"共 {len(items[:6])} 个候选：无字幕 {no_sub} 个，评论生成失败 {no_comment} 个",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._note_check("搜索或发送出错", str(exc)[:100])
         finally:
             await client.close()
 
