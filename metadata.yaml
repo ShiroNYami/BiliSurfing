@@ -1,4 +1,4 @@
-name: astrbot_plugin_bili_reader
+﻿name: astrbot_plugin_bili_reader
 display_name: B站冲浪管理器
 short_desc: 发 B 站链接，Bot 自己看画面、读字幕和热评，再回答你。
 desc: >-
@@ -13,8 +13,9 @@ help: >-
   4) 插件卡片里的页面入口打开管理面板（配置、记忆、浏览记录）。
   需要登录态时在配置里填 B 站 Cookie；评论功能请自行评估账号风险。
 version: v0.2.0
-author: dafiyu
+author: ShiroNYami
 repo: https://github.com/ShiroNYami/BiliSurfing
 astrbot_version: ">=4.16,<5"
 support_platforms:
   - aiocqhttp
+
