@@ -12,7 +12,7 @@ help: >-
   3) /记住 内容、/记忆、/忘记 管理语气规则；
   4) 插件卡片里的页面入口打开管理面板（配置、记忆、浏览记录）。
   需要登录态时在配置里填 B 站 Cookie；评论功能请自行评估账号风险。
-version: v0.2.1
+version: v0.2.2
 author: ShiroNYami
 repo: https://github.com/ShiroNYami/BiliSurfing
 astrbot_version: ">=4.16,<5"

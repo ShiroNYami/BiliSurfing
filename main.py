@@ -41,6 +41,13 @@ from .panel import page_html
 
 PLUGIN: "BiliReaderPlugin | None" = None
 
+# 自动学习语气时，规则里出现这些词就丢掉：只学温和/日常的，不学骂人和阴阳
+_LEARN_BLOCKLIST = (
+    "傻逼", "傻b", "妈的", "他妈", "你妈", "草泥马", "卧槽", "去死", "脑残", "弱智",
+    "废物", "狗东西", "死妈", "贱", "滚蛋", "阴阳", "嘲讽", "攻击", "骂人", "脏话",
+    "政治", "色情", "擦边", "地域",
+)
+
 
 _MD_INLINE = [
     (re.compile(r"\*\*(.+?)\*\*", re.S), r"\1"),
@@ -1148,7 +1155,10 @@ class BiliReaderPlugin(Star):
         try:
             resp = await provider.text_chat(
                 prompt=prompt,
-                system_prompt="你是 B 站上说话简短自然的普通用户，回复只有一句评论。",
+                system_prompt=(
+                    "你是「蓝色大肥鱼」，20 岁的网友。说话短、口语、偶尔损一句但不刻薄，"
+                    "不卖萌不客套。只输出一句评论。"
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[bili_reader] 生成评论失败：{exc}")
@@ -1240,6 +1250,8 @@ class BiliReaderPlugin(Star):
                 continue
             if any(w in rule for w in self._blocked_words()):
                 continue
+            if any(w in rule for w in _LEARN_BLOCKLIST):
+                continue
             if self._is_duplicate_rule(rule):
                 continue
             item = self._add_memory(rule, "auto")
@@ -1259,9 +1271,12 @@ class BiliReaderPlugin(Star):
             return []
         sample_text = "\n".join(f"- {c}" for c in comments)
         prompt = (
-            "下面是从 B 站视频评论区摘出来的真实评论。请归纳出 1-2 条「说话语气」上的可复用规则，"
-            "用来让聊天更像真人。要求：只描述语气、句式、节奏，不要具体梗、人名、事件；"
-            "不鼓励攻击、阴阳怪气、脏话；每条不超过 30 字，用祈使句。\n\n"
+            "下面是从 B 站视频评论区摘出来的真实评论。请归纳 1-2 条「说话语气」上的可复用规则，"
+            "用来让聊天更像真人。\n"
+            "只学这两类：① 温和、可爱、卖萌的语气；② 普通日常聊天的语气（短句、口语、接话方式）。\n"
+            "绝对不要学的：脏话、侮辱、人身攻击、阴阳怪气、嘲讽对线、擦边、政治、地域黑、"
+            "以及任何带攻击性或敏感内容的表达。看到这类评论直接忽略它。\n"
+            "要求：只描述语气、句式、节奏，不要具体梗、人名、事件；每条不超过 30 字，用祈使句。\n\n"
             f"{sample_text}\n\n"
             "只输出 JSON 字符串数组，例如 [\"多用短句，少用书面语\"]，不要解释。"
         )
