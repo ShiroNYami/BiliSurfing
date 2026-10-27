@@ -1202,6 +1202,58 @@ class BiliReaderPlugin(Star):
                 return True
         return False
 
+    async def _find_duplicate_rule(self, text: str) -> dict | None:
+        """让模型判断新规则和已有的哪一条说的是同一件事。"""
+        autos = [m for m in self._memories if m.get("source") == "auto"]
+        if not autos:
+            return None
+        provider = await self.context.get_using_provider_async(self._owner_umo)
+        if not provider:
+            return None
+        listing = "\n".join(f"{i}. {m.get('text')}" for i, m in enumerate(autos))
+        prompt = (
+            f"新规则：{text}\n\n已有规则：\n{listing}\n\n"
+            "新规则如果和其中某一条说的是同一件事（只是换了说法），只输出那条的编号；"
+            "如果没有重复，只输出 -1。不要解释。"
+        )
+        try:
+            resp = await provider.text_chat(
+                prompt=prompt, system_prompt="你是规则去重器，只输出一个整数。"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 判断语气规则重复失败：{exc}")
+            return None
+        raw = (resp.completion_text or "").strip()
+        digits = re.findall(r"-?\d+", raw)
+        if not digits:
+            return None
+        index = int(digits[0])
+        if 0 <= index < len(autos):
+            return autos[index]
+        return None
+
+    async def _merge_rule_texts(self, old: str, new: str) -> str:
+        """把两条重复的规则合成一条，失败就返回空串（保留原样）。"""
+        if not old or old == new:
+            return ""
+        provider = await self.context.get_using_provider_async(self._owner_umo)
+        if not provider:
+            return ""
+        prompt = (
+            f"两条语气规则：\nA：{old}\nB：{new}\n\n"
+            "它们说的是同一件事。请合并成一条更准确、不重复、不超过 30 字的祈使句。"
+            "只输出规则本身，不要引号、不要解释。"
+        )
+        try:
+            resp = await provider.text_chat(
+                prompt=prompt, system_prompt="你是语言风格整理器，只输出一句规则。"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 合并语气规则失败：{exc}")
+            return ""
+        text = (resp.completion_text or "").strip().strip('"“”').strip("。；;")
+        return text if 4 <= len(text) <= 40 else ""
+
     async def _maybe_learn(self) -> None:
         if not self._get_bool("auto_learn_enable", True):
             return
@@ -1209,7 +1261,7 @@ class BiliReaderPlugin(Star):
         if time.time() - float(self._learn_state.get("last_ts") or 0) < interval:
             return
         auto_count = sum(1 for m in self._memories if m.get("source") == "auto")
-        if auto_count >= max(1, self._get_int("auto_learn_max", 8)):
+        if auto_count >= max(1, self._get_int("auto_learn_max", 4)):
             return
 
         seen: list[str] = []
@@ -1253,6 +1305,14 @@ class BiliReaderPlugin(Star):
             if any(w in rule for w in _LEARN_BLOCKLIST):
                 continue
             if self._is_duplicate_rule(rule):
+                continue
+            similar = await self._find_duplicate_rule(rule)
+            if similar is not None:
+                merged = await self._merge_rule_texts(str(similar.get("text") or ""), rule)
+                if merged:
+                    similar["text"] = merged
+                    self._save_memories()
+                    logger.info(f"[bili_reader] 语气规则合并：{rule[:20]} → {merged[:20]}")
                 continue
             item = self._add_memory(rule, "auto")
             if item:
