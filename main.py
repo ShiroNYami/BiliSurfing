@@ -48,6 +48,21 @@ _LEARN_BLOCKLIST = (
     "政治", "色情", "擦边", "地域",
 )
 
+_NEGATIONS = ("不", "别", "少", "避免", "拒绝", "切勿")
+
+
+def _rule_blocked(rule: str) -> bool:
+    """命中负面词才算违规；「不攻击人」这种带否定的放行。"""
+    for word in _LEARN_BLOCKLIST:
+        index = rule.find(word)
+        if index < 0:
+            continue
+        prefix = rule[max(0, index - 4) : index]
+        if any(neg in prefix for neg in _NEGATIONS):
+            continue
+        return True
+    return False
+
 
 _MD_INLINE = [
     (re.compile(r"\*\*(.+?)\*\*", re.S), r"\1"),
@@ -1292,19 +1307,25 @@ class BiliReaderPlugin(Star):
 
         samples = [s for s in samples if 6 <= len(s) <= 80][:20]
         if len(samples) < 5:
+            logger.info(f"[bili_reader] 语气学习：样本不足（{len(samples)} 条），跳过")
             return
 
         rules = await self._distill_rules(samples)
+        logger.info(f"[bili_reader] 语气学习：样本 {len(samples)} 条，模型给出 {len(rules)} 条")
         added = 0
         for rule in rules:
             rule = rule.strip().strip("。；;")
             if not (4 <= len(rule) <= 40):
+                logger.info(f"[bili_reader] 语气规则跳过（长度）：{rule[:20]}")
                 continue
             if any(w in rule for w in self._blocked_words()):
+                logger.info(f"[bili_reader] 语气规则跳过（屏蔽词）：{rule[:20]}")
                 continue
-            if any(w in rule for w in _LEARN_BLOCKLIST):
+            if _rule_blocked(rule):
+                logger.info(f"[bili_reader] 语气规则跳过（负面词）：{rule[:20]}")
                 continue
             if self._is_duplicate_rule(rule):
+                logger.info(f"[bili_reader] 语气规则跳过（完全重复）：{rule[:20]}")
                 continue
             similar = await self._find_duplicate_rule(rule)
             if similar is not None:
@@ -1313,6 +1334,8 @@ class BiliReaderPlugin(Star):
                     similar["text"] = merged
                     self._save_memories()
                     logger.info(f"[bili_reader] 语气规则合并：{rule[:20]} → {merged[:20]}")
+                else:
+                    logger.info(f"[bili_reader] 语气规则同义但合并失败，保留原样：{rule[:20]}")
                 continue
             item = self._add_memory(rule, "auto")
             if item:
@@ -1357,9 +1380,10 @@ class BiliReaderPlugin(Star):
         prompt = (
             "下面是从 B 站视频评论区摘出来的真实评论。请归纳 1-2 条「说话语气」上的可复用规则，"
             "用来让聊天更像真人。\n"
-            "只学这两类：① 温和、可爱、卖萌的语气；② 普通日常聊天的语气（短句、口语、接话方式）。\n"
+            "优先学这三类：① 温和、可爱、卖萌的语气；② 普通日常聊天的语气（短句、口语、接话方式）；"
+            "③ 吐槽或玩梗时「说得有意思但不难听」的分寸。\n"
             "绝对不要学的：脏话、侮辱、人身攻击、阴阳怪气、嘲讽对线、擦边、政治、地域黑、"
-            "以及任何带攻击性或敏感内容的表达。看到这类评论直接忽略它。\n"
+            "以及任何带攻击性或敏感内容的表达。看到这类评论直接忽略它，但不要因为评论区有脏话就一条都不学。\n"
             "要求：只描述语气、句式、节奏，不要具体梗、人名、事件；每条不超过 30 字，用祈使句。\n\n"
             f"{sample_text}\n\n"
             "只输出 JSON 字符串数组，例如 [\"多用短句，少用书面语\"]，不要解释。"
