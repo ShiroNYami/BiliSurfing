@@ -646,7 +646,7 @@ class BiliReaderPlugin(Star):
                     "last_check_at": self._last_check.get("time", ""),
                     "last_check_detail": self._last_check.get("detail", ""),
                 },
-                "history": list(reversed(self._history[-100:])),
+                "history": list(reversed(self._history[-300:])),
                 "memories": self._memories,
             }
         )
@@ -737,7 +737,7 @@ class BiliReaderPlugin(Star):
         if data.get("action") == "clear":
             self._history = []
             self._save_history()
-        return JSONResponse({"ok": True, "history": list(reversed(self._history[-100:]))})
+        return JSONResponse({"ok": True, "history": list(reversed(self._history[-300:]))})
 
     # ---------- 自动评论 ----------
 
