@@ -1338,6 +1338,8 @@ class BiliReaderPlugin(Star):
                 merged = await self._merge_rule_texts(str(similar.get("text") or ""), rule)
                 if merged:
                     similar["text"] = merged
+                    # 被合并维护过的规则算“新”，避免因为最旧而被淘汰
+                    similar["created_at"] = time.strftime("%Y-%m-%d %H:%M")
                     self._save_memories()
                     logger.info(f"[bili_reader] 语气规则合并：{rule[:20]} → {merged[:20]}")
                 else:
