@@ -38,8 +38,14 @@
   "auto_learn_max": {
     "type": "int",
     "description": "自动记忆条数上限",
-    "hint": "自动学到的规则最多保留这么多条，超了就不再学，避免人格被带偏。默认 8。",
+    "hint": "自动学到的规则最多保留这么多条；满了会淘汰最旧的一条再学。手动规则不占这个名额。默认 8。",
     "default": 8
+  },
+  "auto_learn_daily_max": {
+    "type": "int",
+    "description": "每天最多学几条",
+    "hint": "每天新增的自动规则上限，到点当天就不再学。默认 2。",
+    "default": 2
   },
   "owner_qq": {
     "type": "string",

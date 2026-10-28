@@ -1275,8 +1275,14 @@ class BiliReaderPlugin(Star):
         interval = max(1, self._get_int("auto_learn_interval_hours", 12)) * 3600
         if time.time() - float(self._learn_state.get("last_ts") or 0) < interval:
             return
-        auto_count = sum(1 for m in self._memories if m.get("source") == "auto")
-        if auto_count >= max(1, self._get_int("auto_learn_max", 4)):
+
+        today = time.strftime("%Y-%m-%d")
+        if self._learn_state.get("day") != today:
+            self._learn_state["day"] = today
+            self._learn_state["day_count"] = 0
+        daily_max = max(1, self._get_int("auto_learn_daily_max", 2))
+        if int(self._learn_state.get("day_count") or 0) >= daily_max:
+            logger.info("[bili_reader] 语气学习：今天的额度用完了")
             return
 
         seen: list[str] = []
@@ -1337,9 +1343,16 @@ class BiliReaderPlugin(Star):
                 else:
                     logger.info(f"[bili_reader] 语气规则同义但合并失败，保留原样：{rule[:20]}")
                 continue
+            auto_max = max(1, self._get_int("auto_learn_max", 8))
+            autos = [m for m in self._memories if m.get("source") == "auto"]
+            if len(autos) >= auto_max:
+                oldest = min(autos, key=lambda m: str(m.get("created_at") or ""))
+                self._memories.remove(oldest)
+                logger.info(f"[bili_reader] 自动规则满 {auto_max} 条，淘汰最旧：{str(oldest.get('text'))[:20]}")
             item = self._add_memory(rule, "auto")
             if item:
                 added += 1
+                self._learn_state["day_count"] = int(self._learn_state.get("day_count") or 0) + 1
             if added >= 2:
                 break
 
