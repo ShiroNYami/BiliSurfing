@@ -446,10 +446,12 @@ class BiliClient:
             "https://api.bilibili.com/x/v2/reply/add",
             {"type": 1, "oid": info.aid, "message": message, "plat": 1, "csrf": csrf},
         )
-        if payload.get("code") != 0:
-            raise BiliError(
-                f"发评论失败：{payload.get('message')}（code {payload.get('code')}）"
-            )
+        code = payload.get("code")
+        if code == 17:
+            # 17 = 发送成功但被折叠，别人看不见
+            return {"_folded": True, "code": 17, "message": payload.get("message") or ""}
+        if code != 0:
+            raise BiliError(f"发评论失败：{payload.get('message')}（code {code}）")
         return payload.get("data") or {}
 
     async def delete_comment(self, info: VideoInfo, rpid: int | str) -> bool:
@@ -459,59 +461,6 @@ class BiliClient:
             {"type": 1, "oid": info.aid, "rpid": str(rpid), "csrf": csrf},
         )
         return payload.get("code") == 0
-
-    async def find_comment(
-        self, info: VideoInfo, rpid: str = "", mid: str = "", pages: int = 5
-    ) -> bool:
-        """在公开评论列表里找自己的评论（按时间倒序翻几页）。"""
-        for pn in range(1, max(1, pages) + 1):
-            payload = await self._json(
-                "https://api.bilibili.com/x/v2/reply",
-                {"type": 1, "oid": info.aid, "pn": pn, "ps": 49, "sort": 0},
-            )
-            if payload.get("code") != 0:
-                return False
-            for reply in (payload.get("data") or {}).get("replies") or []:
-                if rpid and str(reply.get("rpid")) == str(rpid):
-                    return True
-                if mid and str((reply.get("member") or {}).get("mid")) == str(mid):
-                    return True
-        return False
-
-    async def at_items(self) -> list[dict]:
-        """消息中心里「@我的」列表（需要登录 Cookie）。"""
-        payload = await self._json(
-            "https://api.bilibili.com/x/msgfeed/at",
-            {"build": 0, "mobi_app": "web", "platform": "web"},
-        )
-        if payload.get("code") != 0:
-            return []
-        return (payload.get("data") or {}).get("items") or []
-
-    async def reply_comment_aid(
-        self, aid: int, root: str, parent: str, message: str
-    ) -> dict:
-        """按 aid 回复某条评论（楼中楼）。"""
-        csrf = self.csrf
-        if not csrf:
-            raise BiliError("Cookie 里缺少 bili_jct，无法回复")
-        payload = await self._post(
-            "https://api.bilibili.com/x/v2/reply/add",
-            {
-                "type": 1,
-                "oid": int(aid),
-                "root": str(root),
-                "parent": str(parent),
-                "message": message,
-                "plat": 1,
-                "csrf": csrf,
-            },
-        )
-        if payload.get("code") != 0:
-            raise BiliError(
-                f"回复失败：{payload.get('message')}（code {payload.get('code')}）"
-            )
-        return payload.get("data") or {}
 
     async def download(self, url: str, dest_path: str, max_bytes: int) -> str:
         """流式下载视频，超过上限立即中断。"""

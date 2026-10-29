@@ -50,6 +50,15 @@ _LEARN_BLOCKLIST = (
 
 _NEGATIONS = ("不", "别", "少", "避免", "拒绝", "切勿")
 
+# 评论区里最像“敷衍”的收尾，发出去前剪掉
+_FILLER_TAIL_RE = re.compile(
+    r"(?:[\s，,、]*(?:哈哈+|笑死|笑喷|笑出了?狗头|什么鬼哈哈?|笑不活了|233+))+[\s。！？!?~～…]*$"
+)
+
+
+def strip_filler_tail(text: str) -> str:
+    return _FILLER_TAIL_RE.sub("", str(text or "")).strip()
+
 
 def _rule_blocked(rule: str) -> bool:
     """命中负面词才算违规；「不攻击人」这种带否定的放行。"""
@@ -1123,8 +1132,22 @@ class BiliReaderPlugin(Star):
                 target = self._get_str("comment_target_name", "") or await client.user_name(
                     self._get_int("comment_target_uid", 0)
                 )
-                message = (f"@{target} {comment}" if target else comment)[:900]
+                message = self._compose_comment(comment, target)[:900]
                 data = await client.post_comment(info, message)
+                if data.get("_folded"):
+                    self._comment_state["last_ts"] = time.time()
+                    self._comment_state["commented"] = (list(done) + [info.bvid])[-200:]
+                    self._save_comment_state()
+                    self._record_history(
+                        "comment", info.bvid, info.title, int(it.get("play") or 0),
+                        f"[折叠] {comment}", info.url,
+                    )
+                    self._note_check("评论被折叠", f"{info.bvid} code 17，@ 或内容可能触发折叠")
+                    await self._send_owner(
+                        f"在《{info.title}》发的评论被折叠了（code 17），别人看不到。\n{info.url}"
+                    )
+                    logger.warning(f"[bili_reader] 评论被折叠 {info.bvid}：{comment[:30]}")
+                    return
                 rpid = data.get("rpid") or ""
                 members = ((data.get("reply") or {}).get("content") or {}).get("members") or []
                 self._comment_state["last_ts"] = time.time()
@@ -1152,6 +1175,14 @@ class BiliReaderPlugin(Star):
         finally:
             await client.close()
 
+    def _compose_comment(self, text: str, target: str = "") -> str:
+        """把 @ 夹在句子里（称呼 + @），避免评论以 @ 开头被系统吞掉。"""
+        name = target or self._get_str("comment_target_name", "")
+        if not name:
+            return text
+        prefix = self._get_str("comment_at_prefix", "主人")
+        return f"{prefix}@{name} {text}" if prefix else f"@{name} {text}"
+
     async def _make_comment(self, info: VideoInfo, subs: list[tuple[float, str]]) -> str:
         provider = await self.context.get_using_provider_async(self._owner_umo)
         if not provider:
@@ -1160,9 +1191,13 @@ class BiliReaderPlugin(Star):
         prompt = (
             f"你在 B 站刷到一个视频：{info.title}（UP 主：{info.owner}）。\n"
             f"字幕片段：{snippet}\n\n"
-            "请以普通网友的身份写一条不超过 30 字的评论：口语、具体、有信息量，"
-            "可以夸一句或提一个细节。不要提 AI、机器人、自动、插件，不要用 @，"
-            "不要涉及政治、色情、暴力、引战、广告、抽奖。只输出评论本身，不要引号。"
+            "写一条不超过 30 字的评论。要求：\n"
+            "- 直接说你的看法、吐槽或判断，不要复述、概括、描述视频内容；\n"
+            "- 不要用“看了…”“这视频…”“UP主…”这种开头；\n"
+            "- 结尾不要加“哈哈 / 笑死 / 笑喷 / 什么鬼哈哈”这类敷衍词；\n"
+            "- 口语、具体，可以损一句但不刻薄；不提 AI、机器人、自动、插件，不 @ 任何人；\n"
+            "- 不涉及政治、色情、暴力、引战、广告、抽奖。\n"
+            "只输出评论本身，不要引号。"
         )
         if self._get_bool("memory_enable", True) and self._memories:
             rules = "\n".join(f"- {m['text']}" for m in self._memories[-20:])
@@ -1180,7 +1215,8 @@ class BiliReaderPlugin(Star):
             return ""
         text = (resp.completion_text or "").strip().strip('"“”')
         text = re.sub(r"@\S+\s*", "", text).strip()
-        if not text or len(text) > 60:
+        text = strip_filler_tail(text)
+        if not text or len(text) < 4 or len(text) > 60:
             return ""
         if any(w in text for w in self._blocked_words()):
             return ""
@@ -1374,7 +1410,8 @@ class BiliReaderPlugin(Star):
         prompt = (
             f"原评论：{text}\n\n"
             "按下面的说话习惯改写这条 B 站评论：意思不变、不超过 40 字、不加新信息、"
-            "不 @ 任何人、不带链接。只输出改写后的评论，不要引号。\n"
+            "不 @ 任何人、不带链接。不要复述视频内容，结尾不要加“哈哈/笑死/笑喷”这类敷衍词。"
+            "只输出改写后的评论，不要引号。\n"
             f"说话习惯：\n{rules}"
         )
         try:
@@ -1385,7 +1422,8 @@ class BiliReaderPlugin(Star):
             return text
         new = (resp.completion_text or "").strip().strip('"“”')
         new = re.sub(r"@\S+\s*", "", new).strip()
-        return new if 2 <= len(new) <= 60 else text
+        new = strip_filler_tail(new)
+        return new if 4 <= len(new) <= 60 else text
 
     async def _distill_rules(self, comments: list[str]) -> list[str]:
         provider = await self.context.get_using_provider_async(self._owner_umo)
@@ -1838,14 +1876,18 @@ class BiliReaderPlugin(Star):
                 )
             if not info:
                 return "当前没有可评论的视频，请先把视频链接发给我。"
-            name = self._get_str("comment_target_name", "")
-            message = f"@{name} {text}" if name else text
+            message = self._compose_comment(text)[:900]
             data = await client.post_comment(info, message[:900])
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[bili_reader] 手动评论失败：{exc}")
             return f"评论发送失败：{exc}"
         finally:
             await client.close()
+
+        if data.get("_folded"):
+            logger.warning(f"[bili_reader] 手动评论被折叠：{text[:30]}")
+            self._record_history("comment", info.bvid, info.title, 0, f"[折叠] {text}", info.url)
+            return "评论发出去了，但被 B 站折叠了（code 17），别人看不到。换个说法再试一次。"
 
         self._last_manual_comment = now
         self._record_history("comment", info.bvid, info.title, 0, text, info.url)

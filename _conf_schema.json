@@ -155,6 +155,12 @@
     "hint": "留空会自动按 UID 查昵称。注意昵称要改时这里也要同步，否则 @ 不生效。",
     "default": ""
   },
+  "comment_at_prefix": {
+    "type": "string",
+    "description": "@ 前面的称呼",
+    "hint": "评论会写成「称呼@昵称 评论内容」，让 @ 落在句子里，降低被折叠的概率。常用：主人、宝宝、老爸；留空则退化成 @昵称 开头。",
+    "default": "主人"
+  },
   "scan_days": {
     "type": "int",
     "description": "只看最近几天",
