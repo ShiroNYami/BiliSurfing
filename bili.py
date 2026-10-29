@@ -421,7 +421,9 @@ class BiliClient:
                     "search_type": "video",
                     "keyword": keyword,
                     "page": page,
-                    "order": "pubdate",
+                    "order": "click",
+                    "pubtime_begin_s": int(deadline),
+                    "pubtime_end_s": int(time.time()),
                 },
             )
             if payload.get("code") != 0:
@@ -442,8 +444,17 @@ class BiliClient:
                 if duration and duration > max_seconds:
                     continue
                 play = int(raw.get("play") or 0)
+                desc = str(raw.get("description") or "").strip()[:160]
                 if play < min_play:
-                    continue
+                    # 搜索接口有时把播放量压成 0/1，用详情接口补真实数据
+                    try:
+                        detail = await self.video_info(f"https://www.bilibili.com/video/{bvid}")
+                        play = int(getattr(detail, "view", 0) or 0)
+                        desc = (detail.desc or desc)[:160]
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if play < min_play:
+                        continue
                 title = re.sub(r"<[^>]+>", "", str(raw.get("title") or "")).strip()
                 seen.add(bvid)
                 items.append(
@@ -454,7 +465,7 @@ class BiliClient:
                         "duration": duration,
                         "pubdate": pubdate,
                         "play": play,
-                        "desc": str(raw.get("description") or "").strip()[:160],
+                        "desc": desc,
                     }
                 )
                 if len(items) >= limit:

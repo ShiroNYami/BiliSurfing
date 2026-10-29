@@ -1087,7 +1087,9 @@ class BiliReaderPlugin(Star):
             if len(roots) >= 5:
                 break
         if not roots:
+            logger.info("[bili_reader] 楼中楼：没有可检查的主评论（历史里缺少 rpid）")
             return
+        logger.debug(f"[bili_reader] 楼中楼：检查 {len(roots)} 条主评论")
 
         client = BiliClient(
             cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
@@ -1259,7 +1261,6 @@ class BiliReaderPlugin(Star):
                 subs = await client.subtitles(info)
                 if not subs:
                     no_sub += 1
-                    continue
                 comment = await self._make_comment(info, subs)
                 if not comment:
                     no_comment += 1
@@ -1323,10 +1324,15 @@ class BiliReaderPlugin(Star):
         provider = await self.context.get_using_provider_async(self._owner_umo)
         if not provider:
             return ""
-        snippet = " ".join(text for _ts, text in subs[:12])[:300]
+        if subs:
+            snippet = " ".join(text for _ts, text in subs[:12])[:300]
+            context_line = f"字幕片段：{snippet}"
+        else:
+            snippet = re.sub(r"\s+", " ", str(info.desc or ""))[:300]
+            context_line = f"简介：{snippet}" if snippet else "（没有字幕，也没有简介，只能看标题）"
         prompt = (
             f"你在 B 站刷到一个视频：{info.title}（UP 主：{info.owner}）。\n"
-            f"字幕片段：{snippet}\n\n"
+            f"{context_line}\n\n"
             "写一条不超过 30 字的评论。要求：\n"
             "- 直接说你的看法、吐槽或判断，不要复述、概括、描述视频内容；\n"
             "- 不要用“看了…”“这视频…”“UP主…”这种开头；\n"
