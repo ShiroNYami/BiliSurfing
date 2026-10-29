@@ -1269,7 +1269,10 @@ class BiliReaderPlugin(Star):
                 target = self._get_str("comment_target_name", "") or await client.user_name(
                     self._get_int("comment_target_uid", 0)
                 )
-                message = self._compose_comment(comment, target)[:900]
+                vocative, body = self._split_vocative(comment)
+                message = (
+                    self._compose_comment(body, target, vocative) if vocative else comment
+                )[:900]
                 data = await client.post_comment(info, message)
                 if data.get("_folded"):
                     self._comment_state["last_ts"] = time.time()
@@ -1313,12 +1316,24 @@ class BiliReaderPlugin(Star):
         finally:
             await client.close()
 
-    def _compose_comment(self, text: str, target: str = "") -> str:
-        """把 @ 夹在句子里（称呼 + @），避免评论以 @ 开头被系统吞掉。"""
+    _VOCATIVES = ("主人", "老爸", "宝宝", "老板", "师傅", "老哥", "妈")
+
+    def _split_vocative(self, text: str) -> tuple[str, str]:
+        """评论如果以称呼开头，说明是在对某个人说话；拆出称呼和正文。"""
+        text = str(text or "").strip()
+        for vocative in self._VOCATIVES:
+            if text.startswith(vocative):
+                rest = text[len(vocative) :].lstrip("，,、:： ")
+                if rest:
+                    return vocative, rest
+        return "", text
+
+    def _compose_comment(self, text: str, target: str = "", vocative: str = "") -> str:
+        """只有在对某个人说话时才 @ 他，并且把 @ 夹在称呼后面。"""
         name = target or self._get_str("comment_target_name", "")
         if not name:
             return text
-        prefix = self._get_str("comment_at_prefix", "主人")
+        prefix = vocative or self._get_str("comment_at_prefix", "主人")
         return f"{prefix}@{name} {text}" if prefix else f"@{name} {text}"
 
     async def _make_comment(self, info: VideoInfo, subs: list[tuple[float, str]]) -> str:
@@ -1333,7 +1348,8 @@ class BiliReaderPlugin(Star):
             "- 直接说你的看法、吐槽或判断，不要复述、概括、描述视频内容；\n"
             "- 不要用“看了…”“这视频…”“UP主…”这种开头；\n"
             "- 结尾不要加“哈哈 / 笑死 / 笑喷 / 什么鬼哈哈”这类敷衍词；\n"
-            "- 口语、具体，可以损一句但不刻薄；不提 AI、机器人、自动、插件，不 @ 任何人；\n"
+            "- 口语、具体，可以损一句但不刻薄；不提 AI、机器人、自动、插件，不 @ 任何人、不称呼任何人；\n"
+            "- 例外：十次里最多一两次，可以写成「主人，帮我看下这个」这种直接对某个人说话的句子，请他看/帮你做事；\n"
             "- 不涉及政治、色情、暴力、引战、广告、抽奖。\n"
             "只输出评论本身，不要引号。"
         )
@@ -2014,7 +2030,8 @@ class BiliReaderPlugin(Star):
                 )
             if not info:
                 return "当前没有可评论的视频，请先把视频链接发给我。"
-            message = self._compose_comment(text)[:900]
+            vocative, body = self._split_vocative(text)
+            message = (self._compose_comment(body, "", vocative) if vocative else text)[:900]
             data = await client.post_comment(info, message[:900])
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[bili_reader] 手动评论失败：{exc}")
