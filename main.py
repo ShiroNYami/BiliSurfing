@@ -541,6 +541,8 @@ class BiliReaderPlugin(Star):
         play: int = 0,
         comment: str = "",
         url: str = "",
+        rpid: str = "",
+        aid: int = 0,
     ) -> None:
         self._history.append(
             {
@@ -549,6 +551,8 @@ class BiliReaderPlugin(Star):
                 "title": title,
                 "play": play,
                 "comment": comment,
+                "rpid": str(rpid or ""),
+                "aid": int(aid or 0),
                 "url": url or f"https://www.bilibili.com/video/{bvid}",
                 "time": time.strftime("%Y-%m-%d %H:%M"),
             }
@@ -1015,6 +1019,131 @@ class BiliReaderPlugin(Star):
         )
         logger.info(f"[bili_reader] 已回复 @，rpid={data.get('rpid')}")
 
+    async def _make_child_reply(self, title: str, text: str) -> str:
+        provider = await self.context.get_using_provider_async(self._owner_umo)
+        if not provider:
+            return ""
+        prompt = (
+            f"你在 B 站视频《{title}》的评论区，有人回复了你：\n{text}\n\n"
+            "用你平时的语气回他一句，不超过 25 字：不要 @ 他、不要复述视频内容、"
+            "结尾不要“哈哈/笑死/笑喷”这类敷衍词；可以接梗、损一句或认真回答；"
+            "不提 AI、机器人、插件。只输出回复本身。"
+        )
+        if self._get_bool("memory_enable", True) and self._memories:
+            rules = "\n".join(f"- {m['text']}" for m in self._memories[-10:])
+            prompt += f"\n\n【说话习惯】\n{rules}"
+        try:
+            resp = await provider.text_chat(
+                prompt=prompt,
+                system_prompt=(
+                    "你是「蓝色大肥鱼」，20 岁网友，说话短、口语、偶尔损但不刻薄。只输出一句话。"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 生成楼中楼回复失败：{exc}")
+            return ""
+        reply = (resp.completion_text or "").strip().strip('"“”')
+        reply = re.sub(r"@\S+\s*", "", reply).strip()
+        reply = strip_filler_tail(reply)
+        return reply if 2 <= len(reply) <= 40 else ""
+
+    async def _maybe_reply_children(self) -> None:
+        """回自己主评论下的楼中楼，每条子评论只回一次。"""
+        if not self._get_bool("reply_children_enable", True):
+            return
+        interval = max(1, self._get_int("reply_poll_minutes", 10)) * 60
+        if time.time() - float(self._comment_state.get("reply_poll_ts") or 0) < interval:
+            return
+        self._comment_state["reply_poll_ts"] = time.time()
+
+        today = time.strftime("%Y-%m-%d")
+        if self._comment_state.get("reply_day") != today:
+            self._comment_state["reply_day"] = today
+            self._comment_state["reply_day_count"] = 0
+        daily_max = max(1, self._get_int("reply_daily_max", 10))
+        if int(self._comment_state.get("reply_day_count") or 0) >= daily_max:
+            return
+
+        window = max(1, self._get_int("reply_window_hours", 24)) * 3600
+        per_root = max(1, self._get_int("reply_per_comment_max", 5))
+        replied = self._comment_state.setdefault("replied", {})
+        now = time.time()
+
+        roots: list[tuple[str, int, str]] = []
+        for item in reversed(self._history[-60:]):
+            if item.get("kind") != "comment":
+                continue
+            rpid = str(item.get("rpid") or "")
+            aid = int(item.get("aid") or 0)
+            if not rpid or not aid:
+                continue
+            try:
+                ts = time.mktime(time.strptime(str(item.get("time") or ""), "%Y-%m-%d %H:%M"))
+            except Exception:  # noqa: BLE001
+                continue
+            if now - ts > window:
+                continue
+            roots.append((rpid, aid, str(item.get("title") or "")))
+            if len(roots) >= 5:
+                break
+        if not roots:
+            return
+
+        client = BiliClient(
+            cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
+        )
+        self_mid = self._self_mid()
+        sent = 0
+        try:
+            for root_rpid, aid, title in roots:
+                if int(self._comment_state.get("reply_day_count") or 0) >= daily_max:
+                    break
+                done = replied.setdefault(root_rpid, [])
+                if len(done) >= per_root:
+                    continue
+                try:
+                    children = await client.child_comments(aid, root_rpid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[bili_reader] 拉楼中楼失败：{exc}")
+                    continue
+                for child in children:
+                    if len(done) >= per_root:
+                        break
+                    if int(self._comment_state.get("reply_day_count") or 0) >= daily_max:
+                        break
+                    cid = child.get("rpid") or ""
+                    if not cid or cid in done:
+                        continue
+                    if self_mid and child.get("mid") == self_mid:
+                        continue
+                    if now - int(child.get("ctime") or 0) > window:
+                        continue
+                    if any(w in str(child.get("text") or "") for w in self._blocked_words()):
+                        continue
+                    reply = await self._make_child_reply(title, str(child.get("text") or ""))
+                    if not reply:
+                        continue
+                    try:
+                        data = await client.reply_comment_aid(aid, root_rpid, cid, reply[:500])
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(f"[bili_reader] 回复楼中楼失败：{exc}")
+                        continue
+                    if data.get("_folded"):
+                        logger.warning(f"[bili_reader] 楼中楼回复被折叠：{reply[:20]}")
+                    done.append(cid)
+                    self._comment_state["reply_day_count"] = int(
+                        self._comment_state.get("reply_day_count") or 0
+                    ) + 1
+                    sent += 1
+                    await asyncio.sleep(3)
+                if len(replied) > 50:
+                    for key in list(replied)[:-50]:
+                        replied.pop(key, None)
+        finally:
+            await client.close()
+            self._save_comment_state()
+        if sent:
+            logger.info(f"[bili_reader] 楼中楼回复了 {sent} 条")
     def _ensure_comment_task(self) -> None:
         if self._comment_task is None or self._comment_task.done():
             self._comment_task = asyncio.create_task(self._comment_loop())
@@ -1034,6 +1163,12 @@ class BiliReaderPlugin(Star):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[bili_reader] @回复异常：{exc}")
+            try:
+                await self._maybe_reply_children()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[bili_reader] 楼中楼回复异常：{exc}")
             try:
                 await self._maybe_learn()
             except asyncio.CancelledError:
@@ -1154,7 +1289,8 @@ class BiliReaderPlugin(Star):
                 self._comment_state["commented"] = (list(done) + [info.bvid])[-200:]
                 self._save_comment_state()
                 self._record_history(
-                    "comment", info.bvid, info.title, int(it.get("play") or 0), comment, info.url
+                    "comment", info.bvid, info.title, int(it.get("play") or 0), comment, info.url,
+                    rpid=rpid, aid=info.aid,
                 )
                 self._note_check("已评论", f"{info.bvid}《{info.title[:20]}》rpid={rpid}")
                 if rpid:
@@ -1890,8 +2026,10 @@ class BiliReaderPlugin(Star):
             return "评论发出去了，但被 B 站折叠了（code 17），别人看不到。换个说法再试一次。"
 
         self._last_manual_comment = now
-        self._record_history("comment", info.bvid, info.title, 0, text, info.url)
         rpid = data.get("rpid") or ""
+        self._record_history(
+            "comment", info.bvid, info.title, 0, text, info.url, rpid=rpid, aid=info.aid
+        )
         return f"已发到《{info.title}》的评论区（rpid {rpid}）。可以顺口告诉用户你说了什么。"
 
     async def _tool_reply(self, event: AstrMessageEvent, index: int, comment: str) -> str:

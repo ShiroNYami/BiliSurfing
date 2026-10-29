@@ -161,6 +161,36 @@
     "hint": "评论会写成「称呼@昵称 评论内容」，让 @ 落在句子里，降低被折叠的概率。常用：主人、宝宝、老爸；留空则退化成 @昵称 开头。",
     "default": "主人"
   },
+  "reply_children_enable": {
+    "type": "bool",
+    "description": "回复自己评论下的楼中楼",
+    "hint": "开启后，定时看她自己评论下有没有人回复，有就回一句。每条子评论只回一次。",
+    "default": true
+  },
+  "reply_poll_minutes": {
+    "type": "int",
+    "description": "楼中楼检查间隔（分钟）",
+    "hint": "默认 10 分钟。调大更稳，调小更及时。",
+    "default": 10
+  },
+  "reply_window_hours": {
+    "type": "int",
+    "description": "只回多久以内的回复",
+    "hint": "默认 24 小时，超过就不回了。",
+    "default": 24
+  },
+  "reply_per_comment_max": {
+    "type": "int",
+    "description": "每条主评论最多回几条",
+    "hint": "默认 5 条，防止一个人把楼刷爆。",
+    "default": 5
+  },
+  "reply_daily_max": {
+    "type": "int",
+    "description": "每天最多回几条楼中楼",
+    "hint": "默认 10 条，控制账号风控。",
+    "default": 10
+  },
   "scan_days": {
     "type": "int",
     "description": "只看最近几天",
