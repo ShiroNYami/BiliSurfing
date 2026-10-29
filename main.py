@@ -1179,7 +1179,7 @@ class BiliReaderPlugin(Star):
                 self._maybe_prune_logs()
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[bili_reader] 清理日志失败：{exc}")
-            await asyncio.sleep(300)
+            await asyncio.sleep(600)
 
     async def _maybe_comment(self) -> None:
         if not self._get_bool("auto_comment_enable", False):
