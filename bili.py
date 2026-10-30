@@ -456,11 +456,23 @@ class BiliClient:
                 if mid and not rpid and str(member.get("mid")) == str(mid):
                     return True
         return False
-    async def dynamic_comments(self, dyn_id: int, pn: int = 1, ps: int = 20) -> list[dict]:
+    async def dynamic_rid(self, dyn_id: int) -> int:
+        """动态评论的 oid 是 rid，不是 dyn_id。"""
+        payload = await self._json(
+            "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail",
+            {"id": int(dyn_id), "features": "itemOpusStyle"},
+        )
+        item = (payload.get("data") or {}).get("item") or {}
+        basic = item.get("basic") or {}
+        try:
+            return int(basic.get("rid_str") or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+    async def dynamic_comments(self, oid: int, pn: int = 1, ps: int = 20) -> list[dict]:
         """拉一条动态下的评论。"""
         payload = await self._json(
             "https://api.bilibili.com/x/v2/reply",
-            {"type": 11, "oid": int(dyn_id), "sort": 1, "ps": ps, "pn": pn},
+            {"type": 11, "oid": int(oid), "sort": 1, "ps": ps, "pn": pn},
         )
         if payload.get("code") != 0:
             return []
@@ -482,7 +494,7 @@ class BiliClient:
             )
         return out
 
-    async def reply_dynamic(self, dyn_id: int, rpid: str, message: str) -> dict:
+    async def reply_dynamic(self, oid: int, rpid: str, message: str) -> dict:
         """回复动态下的评论。"""
         csrf = self.csrf
         if not csrf:
@@ -491,7 +503,7 @@ class BiliClient:
             "https://api.bilibili.com/x/v2/reply/add",
             {
                 "type": 11,
-                "oid": int(dyn_id),
+                "oid": int(oid),
                 "root": str(rpid),
                 "parent": str(rpid),
                 "message": message,

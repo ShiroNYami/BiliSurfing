@@ -9,6 +9,7 @@ import os
 import random
 import re
 import time
+import traceback
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -1152,8 +1153,12 @@ class BiliReaderPlugin(Star):
         if not self._get_bool("reply_children_enable", True):
             return
         state = self._load_diary_state()
-        dyn = str(state.get("last_dyn") or "")
-        if not dyn or state.get("day") != time.strftime("%Y-%m-%d"):
+        dyn_id = str(state.get("last_dyn") or "")
+        dyn = dyn_id
+        if not dyn:
+            return
+        window_check = max(1, self._get_int("reply_window_hours", 24)) * 3600
+        if time.time() - float(state.get("planned_ts") or 0) > window_check:
             return
         daily_max = max(1, self._get_int("reply_daily_max", 10))
         if int(self._comment_state.get("reply_day_count") or 0) >= daily_max:
@@ -1171,7 +1176,12 @@ class BiliReaderPlugin(Star):
         window = max(1, self._get_int("reply_window_hours", 24)) * 3600
         now = time.time()
         try:
-            items = await client.dynamic_comments(int(dyn))
+            rid = int(state.get("last_rid") or 0)
+            if not rid:
+                rid = await client.dynamic_rid(int(dyn))
+            if not rid:
+                return
+            items = await client.dynamic_comments(rid)
             for child in items:
                 if len(done) >= per_root:
                     break
@@ -1191,7 +1201,7 @@ class BiliReaderPlugin(Star):
                 if not reply:
                     continue
                 try:
-                    data = await client.reply_dynamic(int(dyn), cid, reply[:500])
+                    data = await client.reply_dynamic(rid, cid, reply[:500])
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"[bili_reader] 回复动态评论失败：{exc}")
                     continue
@@ -1346,6 +1356,7 @@ class BiliReaderPlugin(Star):
         dyn_id = str(data.get("dyn_id_str") or "")
         state["posted"] = True
         state["last_dyn"] = dyn_id
+        state["last_rid"] = int(data.get("dyn_rid") or 0)
         state["text"] = text
         self._save_diary_state(state)
         self._record_history("diary", "", "今日动态", 0, text, f"https://t.bilibili.com/{dyn_id}")
@@ -1399,7 +1410,7 @@ class BiliReaderPlugin(Star):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                logger.warning(f"[bili_reader] 回复动态评论异常：{exc}")
+                logger.warning(f"[bili_reader] 回复动态评论异常：{exc}\n{traceback.format_exc()[:800]}")
             try:
                 await self._maybe_diary()
             except asyncio.CancelledError:
