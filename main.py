@@ -1132,6 +1132,7 @@ class BiliReaderPlugin(Star):
                         continue
                     if data.get("_folded"):
                         logger.warning(f"[bili_reader] 楼中楼回复被折叠：{reply[:20]}")
+                    self._append_reply_inbox(title, str(child.get("text") or ""), reply)
                     done.append(cid)
                     self._comment_state["reply_day_count"] = int(
                         self._comment_state.get("reply_day_count") or 0
@@ -1507,6 +1508,21 @@ class BiliReaderPlugin(Star):
                     return vocative, rest
         return "", text
 
+    def _append_reply_inbox(self, title: str, their: str, reply: str) -> None:
+        """把楼中楼回复写进 inbox，让 QQ 侧也能记住。"""
+        entry = {
+            "kind": "reply",
+            "title": title,
+            "their": their[:60],
+            "comment": reply,
+            "ts": time.time(),
+        }
+        try:
+            path = os.path.join(self._data_dir, "watch_inbox.jsonl")
+            with open(path, "a", encoding="utf-8") as fp:
+                fp.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 写回复 inbox 失败：{exc}")
     async def _pick_video(self, candidates: list[tuple]) -> int:
         """在候选里按她的兴趣挑一个最想评论的。"""
         if len(candidates) < 2:
@@ -1537,6 +1553,7 @@ class BiliReaderPlugin(Star):
         """把“刷到什么”写进 inbox，等 fish_memory 导入成记忆。"""
         snippet = " ".join(text for _ts, text in subs[:8])[:60]
         entry = {
+            "kind": "comment",
             "title": info.title,
             "snippet": snippet,
             "comment": comment,
