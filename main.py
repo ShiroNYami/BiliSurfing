@@ -1146,6 +1146,169 @@ class BiliReaderPlugin(Star):
             self._save_comment_state()
         if sent:
             logger.info(f"[bili_reader] 楼中楼回复了 {sent} 条")
+    # ---------- 每日动态 ----------
+
+    def _diary_state_file(self) -> str:
+        return os.path.join(self._data_dir, "diary_state.json")
+
+    def _load_diary_state(self) -> dict:
+        try:
+            with open(self._diary_state_file(), encoding="utf-8") as fp:
+                return json.load(fp) or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _save_diary_state(self, state: dict) -> None:
+        try:
+            tmp = self._diary_state_file() + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fp:
+                json.dump(state, fp, ensure_ascii=False, indent=2)
+            os.replace(tmp, self._diary_state_file())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 保存动态状态失败：{exc}")
+
+    def _diary_sources(self) -> str:
+        parts: list[str] = []
+        # 所有会话的记忆都可以用，但发出去前会做匿名化
+        root = os.path.join(get_astrbot_data_path(), "plugin_data", "fish_memory")
+        entries: list[tuple[float, str]] = []
+        try:
+            for name in sorted(os.listdir(root)):
+                if name in ("journal", "export"):
+                    continue
+                path = os.path.join(root, name, "entries.json")
+                if not os.path.isfile(path):
+                    continue
+                with open(path, encoding="utf-8") as fp:
+                    data = json.load(fp)
+                for entry in data:
+                    text = str(entry.get("text") or "").strip()
+                    if 6 <= len(text) <= 60 and int(entry.get("importance") or 0) >= 2:
+                        entries.append((float(entry.get("created_at") or 0), text))
+            entries.sort(key=lambda pair: pair[0], reverse=True)
+            picked = [text for _ts, text in entries[:6]]
+            if picked:
+                parts.append("最近的事：\n" + "\n".join(f"- {x}" for x in picked))
+        except Exception:  # noqa: BLE001
+            pass
+        recent = [h for h in self._history[-12:] if h.get("title")]
+        if recent:
+            titles = [str(h.get("title"))[:30] for h in recent[-3:]]
+            parts.append("最近看的视频：\n" + "\n".join(f"- {x}" for x in titles))
+        return "\n\n".join(parts)
+
+    def _persona_prompt(self) -> str:
+        try:
+            import sqlite3
+
+            path = os.path.join(get_astrbot_data_path(), "data_v4.db")
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            row = conn.execute(
+                "select system_prompt from personas where persona_id=?",
+                ("蓝色大肥鱼",),
+            ).fetchone()
+            conn.close()
+            return str(row[0]) if row else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    async def _make_diary(self) -> str:
+        provider = await self.context.get_using_provider_async(self._owner_umo)
+        if not provider:
+            return ""
+        sources = self._diary_sources()
+        if not sources:
+            return ""
+        persona = self._persona_prompt()
+        system = (
+            (persona[:2500] + "\n\n" if persona else "")
+            + "你在写自己今天的 B 站动态。只输出动态正文，不要解释。"
+        )
+        prompt = (
+            f"{sources}\n\n"
+            "写一条今天的日记，1-2 句，不超过 80 字：可以写最近的事、你的想法，"
+            "或对某个人/人类的观察、争执、情绪。可以写关系里的细节，但一律用「他」「她」「朋友」"
+            "代替真实姓名，不要出现 QQ 号、手机号、地址、公司、学校、链接、话题，"
+            "不要提 AI、机器人、插件。只输出正文。"
+        )
+        try:
+            resp = await provider.text_chat(prompt=prompt, system_prompt=system)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 生成动态失败：{exc}")
+            return ""
+        text = (resp.completion_text or "").strip().strip('"“”')
+        text = re.sub(r"https?://\S+", "", text)
+        text = re.sub(r"@\S+\s*", "", text)
+        text = re.sub(r"\d{5,}", "一串数字", text)
+        text = strip_filler_tail(text)
+        return text if 4 <= len(text) <= 120 else ""
+
+    async def _maybe_diary(self) -> None:
+        if not self._get_bool("diary_enable", True):
+            return
+        now = time.time()
+        start = self._get_int("diary_hour_start", 10)
+        end = self._get_int("diary_hour_end", 23)
+        hour = time.localtime(now).tm_hour
+        if not (start <= hour < end):
+            return
+
+        state = self._load_diary_state()
+        today = time.strftime("%Y-%m-%d")
+        if state.get("day") != today:
+            state["day"] = today
+            state["posted"] = False
+            base = time.mktime(
+                (time.localtime(now).tm_year, time.localtime(now).tm_mon,
+                 time.localtime(now).tm_mday, start, 0, 0, 0, 0, -1)
+            )
+            state["planned_ts"] = base + random.randint(0, max(1, (end - start) * 3600))
+            self._save_diary_state(state)
+        if state.get("posted"):
+            return
+        if now < float(state.get("planned_ts") or 0):
+            return
+
+        text = await self._make_diary()
+        if not text:
+            return
+        client = BiliClient(
+            cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
+        )
+        try:
+            data = await client.create_dynamic(text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 发动态失败：{exc}")
+            return
+        finally:
+            await client.close()
+
+        dyn_id = str(data.get("dyn_id_str") or "")
+        state["posted"] = True
+        state["last_dyn"] = dyn_id
+        state["text"] = text
+        self._save_diary_state(state)
+        self._record_history("diary", "", "今日动态", 0, text, f"https://t.bilibili.com/{dyn_id}")
+        await self._send_owner(f"今天发了条动态：{text}\nhttps://t.bilibili.com/{dyn_id}")
+        logger.info(f"[bili_reader] 已发动态 {dyn_id}：{text[:30]}")
+    @filter.on_llm_request()
+    async def inject_diary_note(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        """让 QQ 里的她知道今天发过什么动态，免得认不出来。"""
+        if not self._get_bool("diary_note_in_chat", True):
+            return
+        if "friend" not in (event.unified_msg_origin or "").lower():
+            return
+        state = self._load_diary_state()
+        if state.get("day") != time.strftime("%Y-%m-%d"):
+            return
+        text = str(state.get("text") or "").strip()
+        if not text:
+            return
+        note = (
+            f"\n【你今天在 B 站发过一条动态】{text}\n"
+            "如果话题相关，可以自然提起；不相关就别硬转。这行是提示，别念出来。"
+        )
+        req.system_prompt = (req.system_prompt or "") + note
     def _ensure_comment_task(self) -> None:
         if self._comment_task is None or self._comment_task.done():
             self._comment_task = asyncio.create_task(self._comment_loop())
@@ -1171,6 +1334,12 @@ class BiliReaderPlugin(Star):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[bili_reader] 楼中楼回复异常：{exc}")
+            try:
+                await self._maybe_diary()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[bili_reader] 发动态异常：{exc}")
             try:
                 await self._maybe_learn()
             except asyncio.CancelledError:

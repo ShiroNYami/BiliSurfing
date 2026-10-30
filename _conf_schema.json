@@ -47,6 +47,30 @@
     "hint": "每天新增的自动规则上限，到点当天就不再学。默认 2。",
     "default": 2
   },
+  "diary_enable": {
+    "type": "bool",
+    "description": "每天发一条 B 站动态",
+    "hint": "用 QQ 记忆和最近看的视频写一条短日记，每天一条，时间随机。",
+    "default": true
+  },
+  "diary_hour_start": {
+    "type": "int",
+    "description": "动态时间窗-开始（点）",
+    "hint": "默认 10 点，和结束时间一起决定随机发布时间。",
+    "default": 10
+  },
+  "diary_note_in_chat": {
+    "type": "bool",
+    "description": "让 QQ 聊天知道今天发过动态",
+    "hint": "开启后，私聊里她会知道今天动态写了什么，被问到或聊到相关话题能自然接上。只影响私聊。",
+    "default": true
+  },
+  "diary_hour_end": {
+    "type": "int",
+    "description": "动态时间窗-结束（点）",
+    "hint": "默认 23 点。",
+    "default": 23
+  },
   "owner_qq": {
     "type": "string",
     "description": "允许教它的 QQ 号",
