@@ -401,6 +401,22 @@ class BiliClient:
             )
         return out
 
+    async def find_comment(self, info: "VideoInfo", rpid: str = "", mid: str = "", pages: int = 3) -> bool:
+        """在公开评论列表里找自己的评论，判断是否真的可见。"""
+        for page in range(1, max(1, pages) + 1):
+            payload = await self._json(
+                "https://api.bilibili.com/x/v2/reply",
+                {"type": 1, "oid": int(info.aid), "sort": 0, "ps": 20, "pn": page},
+            )
+            if payload.get("code") != 0:
+                return False
+            for reply in (payload.get("data") or {}).get("replies") or []:
+                if rpid and str(reply.get("rpid")) == str(rpid):
+                    return True
+                member = reply.get("member") or {}
+                if mid and not rpid and str(member.get("mid")) == str(mid):
+                    return True
+        return False
     async def search_videos(
         self,
         keyword: str,
