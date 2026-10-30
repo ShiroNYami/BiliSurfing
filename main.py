@@ -1423,6 +1423,7 @@ class BiliReaderPlugin(Star):
 
             no_sub = 0
             no_comment = 0
+            candidates: list[tuple] = []
             for it in items[:6]:
                 info = await client.video_info(
                     f"https://www.bilibili.com/video/{it['bvid']}"
@@ -1431,6 +1432,14 @@ class BiliReaderPlugin(Star):
                 if not subs:
                     no_sub += 1
                     continue
+                candidates.append((info, subs, it))
+                if len(candidates) >= 3:
+                    break
+            if candidates:
+                pick = await self._pick_video(candidates)
+                if 0 < pick < len(candidates):
+                    candidates.insert(0, candidates.pop(pick))
+            for info, subs, it in candidates:
                 comment = await self._make_comment(info, subs)
                 if not comment:
                     no_comment += 1
@@ -1466,6 +1475,7 @@ class BiliReaderPlugin(Star):
                     "comment", info.bvid, info.title, int(it.get("play") or 0), comment, info.url,
                     rpid=rpid, aid=info.aid,
                 )
+                self._append_watch_inbox(info, subs, comment)
                 self._note_check("已评论", f"{info.bvid}《{info.title[:20]}》rpid={rpid}")
                 if rpid:
                     asyncio.create_task(self._verify_comment(info, rpid))
@@ -1497,6 +1507,47 @@ class BiliReaderPlugin(Star):
                     return vocative, rest
         return "", text
 
+    async def _pick_video(self, candidates: list[tuple]) -> int:
+        """在候选里按她的兴趣挑一个最想评论的。"""
+        if len(candidates) < 2:
+            return 0
+        provider = await self.context.get_using_provider_async(self._owner_umo)
+        if not provider:
+            return 0
+        lines = []
+        for index, (info, subs, _it) in enumerate(candidates):
+            snippet = " ".join(text for _ts, text in subs[:6])[:40]
+            lines.append(f"{index}. {info.title}（{snippet}）")
+        prompt = (
+            "下面是几个你刷到的 B 站视频：\n"
+            + "\n".join(lines)
+            + "\n\n按你自己的兴趣挑一个最想评论的，只输出编号数字，不要解释。"
+        )
+        try:
+            resp = await provider.text_chat(prompt=prompt, system_prompt="你只输出一个数字。")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 挑选视频失败：{exc}")
+            return 0
+        digits = re.findall(r"\d+", resp.completion_text or "")
+        if not digits:
+            return 0
+        index = int(digits[0])
+        return index if 0 <= index < len(candidates) else 0
+    def _append_watch_inbox(self, info: VideoInfo, subs: list[tuple[float, str]], comment: str) -> None:
+        """把“刷到什么”写进 inbox，等 fish_memory 导入成记忆。"""
+        snippet = " ".join(text for _ts, text in subs[:8])[:60]
+        entry = {
+            "title": info.title,
+            "snippet": snippet,
+            "comment": comment,
+            "ts": time.time(),
+        }
+        try:
+            path = os.path.join(self._data_dir, "watch_inbox.jsonl")
+            with open(path, "a", encoding="utf-8") as fp:
+                fp.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 写浏览 inbox 失败：{exc}")
     def _compose_comment(self, text: str, target: str = "", vocative: str = "") -> str:
         """只有在对某个人说话时才 @ 他，并且把 @ 夹在称呼后面。"""
         name = target or self._get_str("comment_target_name", "")
