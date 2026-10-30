@@ -456,6 +456,55 @@ class BiliClient:
                 if mid and not rpid and str(member.get("mid")) == str(mid):
                     return True
         return False
+    async def dynamic_comments(self, dyn_id: int, pn: int = 1, ps: int = 20) -> list[dict]:
+        """拉一条动态下的评论。"""
+        payload = await self._json(
+            "https://api.bilibili.com/x/v2/reply",
+            {"type": 11, "oid": int(dyn_id), "sort": 1, "ps": ps, "pn": pn},
+        )
+        if payload.get("code") != 0:
+            return []
+        out: list[dict] = []
+        for reply in (payload.get("data") or {}).get("replies") or []:
+            message = ((reply.get("content") or {}).get("message") or "").strip()
+            message = re.sub(r"\[[^\]]{1,8}\]", "", message)
+            message = re.sub(r"\s+", " ", message).strip()
+            if not message:
+                continue
+            member = reply.get("member") or {}
+            out.append(
+                {
+                    "rpid": str(reply.get("rpid") or ""),
+                    "mid": str(member.get("mid") or ""),
+                    "text": message,
+                    "ctime": int(reply.get("ctime") or 0),
+                }
+            )
+        return out
+
+    async def reply_dynamic(self, dyn_id: int, rpid: str, message: str) -> dict:
+        """回复动态下的评论。"""
+        csrf = self.csrf
+        if not csrf:
+            raise BiliError("Cookie 里缺少 bili_jct，无法回复")
+        payload = await self._post(
+            "https://api.bilibili.com/x/v2/reply/add",
+            {
+                "type": 11,
+                "oid": int(dyn_id),
+                "root": str(rpid),
+                "parent": str(rpid),
+                "message": message,
+                "plat": 1,
+                "csrf": csrf,
+            },
+        )
+        code = payload.get("code")
+        if code == 17:
+            return {"_folded": True, "code": 17}
+        if code != 0:
+            raise BiliError(f"回复动态失败：{payload.get('message')}（code {code}）")
+        return payload.get("data") or {}
     async def search_videos(
         self,
         keyword: str,

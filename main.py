@@ -1147,6 +1147,65 @@ class BiliReaderPlugin(Star):
             self._save_comment_state()
         if sent:
             logger.info(f"[bili_reader] 楼中楼回复了 {sent} 条")
+    async def _maybe_reply_dynamic(self) -> None:
+        """回她最新那条动态下的评论。"""
+        if not self._get_bool("reply_children_enable", True):
+            return
+        state = self._load_diary_state()
+        dyn = str(state.get("last_dyn") or "")
+        if not dyn or state.get("day") != time.strftime("%Y-%m-%d"):
+            return
+        daily_max = max(1, self._get_int("reply_daily_max", 10))
+        if int(self._comment_state.get("reply_day_count") or 0) >= daily_max:
+            return
+        per_root = max(1, self._get_int("reply_per_comment_max", 5))
+        replied = self._comment_state.setdefault("replied_dyn", {})
+        done = replied.setdefault(dyn, [])
+        if len(done) >= per_root:
+            return
+
+        client = BiliClient(
+            cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
+        )
+        self_mid = self._self_mid()
+        window = max(1, self._get_int("reply_window_hours", 24)) * 3600
+        now = time.time()
+        try:
+            items = await client.dynamic_comments(int(dyn))
+            for child in items:
+                if len(done) >= per_root:
+                    break
+                if int(self._comment_state.get("reply_day_count") or 0) >= daily_max:
+                    break
+                cid = str(child.get("rpid") or "")
+                if not cid or cid in done:
+                    continue
+                if self_mid and str(child.get("mid")) == self_mid:
+                    continue
+                if now - int(child.get("ctime") or 0) > window:
+                    continue
+                text = str(child.get("text") or "")
+                if any(w in text for w in self._blocked_words()):
+                    continue
+                reply = await self._make_child_reply("我的B站动态", text)
+                if not reply:
+                    continue
+                try:
+                    data = await client.reply_dynamic(int(dyn), cid, reply[:500])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[bili_reader] 回复动态评论失败：{exc}")
+                    continue
+                if data.get("_folded"):
+                    logger.warning(f"[bili_reader] 动态回复被折叠：{reply[:20]}")
+                self._append_reply_inbox("我的B站动态", text, reply)
+                done.append(cid)
+                self._comment_state["reply_day_count"] = int(
+                    self._comment_state.get("reply_day_count") or 0
+                ) + 1
+                await asyncio.sleep(3)
+        finally:
+            await client.close()
+            self._save_comment_state()
     # ---------- 每日动态 ----------
 
     def _diary_state_file(self) -> str:
@@ -1335,6 +1394,12 @@ class BiliReaderPlugin(Star):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[bili_reader] 楼中楼回复异常：{exc}")
+            try:
+                await self._maybe_reply_dynamic()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[bili_reader] 回复动态评论异常：{exc}")
             try:
                 await self._maybe_diary()
             except asyncio.CancelledError:
