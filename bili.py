@@ -517,6 +517,22 @@ class BiliClient:
         if code != 0:
             raise BiliError(f"回复动态失败：{payload.get('message')}（code {code}）")
         return payload.get("data") or {}
+    async def fetch_page(self, url: str, api_key: str, api_base: str = "https://api.deepseek.com") -> dict:
+        """用 DeepSeek Fetch 接口抓网页，返回 {title, content}。"""
+        base = api_base.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        endpoint = base + "/v1/tools/fetch"
+        resp = await self._client.post(
+            endpoint,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"url": url},
+        )
+        payload = resp.json()
+        if "error" in payload:
+            raise BiliError(f"抓取失败：{payload['error'].get('message')}")
+        return payload
+
     async def search_videos(
         self,
         keyword: str,

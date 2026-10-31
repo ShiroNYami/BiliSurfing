@@ -53,6 +53,18 @@
     "hint": "用 QQ 记忆和最近看的视频写一条短日记，每天一条，时间随机。",
     "default": true
   },
+  "link_fetch_enable": {
+    "type": "bool",
+    "description": "读取普通网页链接",
+    "hint": "开启后，私聊里发非 B站 链接（博客/新闻/文档），会抓取正文再回答。",
+    "default": true
+  },
+  "link_fetch_max_chars": {
+    "type": "int",
+    "description": "网页正文最大字符数",
+    "hint": "默认 3000，太大费 token。",
+    "default": 3000
+  },
   "diary_hour_start": {
     "type": "int",
     "description": "动态时间窗-开始（点）",
@@ -306,4 +318,3 @@
     "default": "cogview-3-flash"
   }
 }
-

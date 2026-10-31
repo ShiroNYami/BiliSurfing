@@ -201,6 +201,7 @@ class BiliReaderPlugin(Star):
         self._comment_state: dict = self._load_comment_state()
         self._comment_task: asyncio.Task | None = None
         self._history: list[dict] = self._load_history()
+        self._link_cache: dict[str, tuple[float, str, str]] = {}
         self._learn_state: dict = self._load_learn_state()
         self._last_video: dict[str, VideoInfo] = {}
         self._last_comments: dict[str, list[dict]] = {}
@@ -1216,6 +1217,75 @@ class BiliReaderPlugin(Star):
         finally:
             await client.close()
             self._save_comment_state()
+    # ---------- 普通网页链接 ----------
+
+    def _deepseek_key(self) -> tuple[str, str]:
+        path = os.path.join(get_astrbot_data_path(), "cmd_config.json")
+        try:
+            with open(path, encoding="utf-8-sig") as fp:
+                cfg = json.load(fp)
+            for source in cfg.get("provider_sources") or []:
+                keys = source.get("key") or []
+                if keys:
+                    return str(keys[0]), str(source.get("api_base") or "https://api.deepseek.com")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 读取 DeepSeek Key 失败：{exc}")
+        return "", ""
+
+    async def _read_link(self, url: str) -> tuple[str, str]:
+        now = time.time()
+        cached = self._link_cache.get(url)
+        if cached and now - cached[0] < 1800:
+            return cached[1], cached[2]
+        api_key, api_base = self._deepseek_key()
+        if not api_key:
+            return "", ""
+        client = BiliClient(
+            cookie=self._get_str("bili_cookie", ""), sessdata=self._get_str("sessdata", "")
+        )
+        try:
+            page = await client.fetch_page(url, api_key, api_base)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[bili_reader] 抓链接失败：{exc}")
+            return "", ""
+        finally:
+            await client.close()
+        title = str(page.get("title") or "")
+        content = str(page.get("content") or "")
+        content = re.sub(r"\n{3,}", "\n\n", content)[: self._get_int("link_fetch_max_chars", 3000)]
+        self._link_cache[url] = (now, title, content)
+        if len(self._link_cache) > 20:
+            for key in list(self._link_cache)[:-20]:
+                self._link_cache.pop(key, None)
+        return title, content
+
+    @filter.on_llm_request()
+    async def inject_link_content(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        """消息里带普通网页链接时，抓正文注入上下文。"""
+        if not self._get_bool("link_fetch_enable", True):
+            return
+        umo = event.unified_msg_origin or ""
+        if "friend" not in umo.lower() and not event.is_at_or_wake_command:
+            return
+        text = self._message_text(event) or ""
+        urls = re.findall(r"https?://[^\s]+", text)
+        url = ""
+        for item in urls:
+            if "bilibili.com" in item or "b23.tv" in item:
+                continue
+            url = item.rstrip("，。,.!！?)）")
+            break
+        if not url:
+            return
+        title, content = await self._read_link(url)
+        if not content:
+            return
+        block = (
+            f"【他发了一个网页链接：{title or url}\n{content[:2000]}\n"
+            "（这是网页正文，直接基于它回答，别复述全文）】"
+        )
+        req.prompt = ((req.prompt or "") + "\n\n" + block).strip()
+
     # ---------- 每日动态 ----------
 
     def _diary_state_file(self) -> str:
