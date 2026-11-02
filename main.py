@@ -1322,6 +1322,8 @@ class BiliReaderPlugin(Star):
                 with open(path, encoding="utf-8") as fp:
                     data = json.load(fp)
                 for entry in data:
+                    if str(entry.get("source") or "") == "diary":
+                        continue
                     text = str(entry.get("text") or "").strip()
                     if 6 <= len(text) <= 60 and int(entry.get("importance") or 0) >= 2:
                         entries.append((float(entry.get("created_at") or 0), text))
@@ -1364,8 +1366,12 @@ class BiliReaderPlugin(Star):
             (persona[:2500] + "\n\n" if persona else "")
             + "你在写自己今天的 B 站动态。只输出动态正文，不要解释。"
         )
+        recent = [str(x) for x in (self._load_diary_state().get("recent") or [])][-5:]
+        avoid = ""
+        if recent:
+            avoid = "\n最近几天已经写过这些，别重复同样的主题：\n" + "\n".join(f"- {x}" for x in recent)
         prompt = (
-            f"{sources}\n\n"
+            f"{sources}{avoid}\n\n"
             "写一条今天的日记，1-2 句，不超过 80 字：可以写最近的事、你的想法，"
             "或对某个人/人类的观察、争执、情绪。可以写关系里的细节，但一律用「他」「她」「朋友」"
             "代替真实姓名，不要出现 QQ 号、手机号、地址、公司、学校、链接、话题，"
@@ -1428,6 +1434,9 @@ class BiliReaderPlugin(Star):
         state["last_dyn"] = dyn_id
         state["last_rid"] = int(data.get("dyn_rid") or 0)
         state["text"] = text
+        recent = [str(x) for x in (state.get("recent") or [])][-4:]
+        recent.append(text)
+        state["recent"] = recent
         self._save_diary_state(state)
         self._record_history("diary", "", "今日动态", 0, text, f"https://t.bilibili.com/{dyn_id}")
         await self._send_owner(f"今天发了条动态：{text}\nhttps://t.bilibili.com/{dyn_id}")
