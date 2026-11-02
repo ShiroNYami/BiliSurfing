@@ -1307,7 +1307,7 @@ class BiliReaderPlugin(Star):
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[bili_reader] 保存动态状态失败：{exc}")
 
-    def _diary_sources(self) -> str:
+    def _diary_sources(self) -> tuple[str, int]:
         parts: list[str] = []
         # 所有会话的记忆都可以用，但发出去前会做匿名化
         root = os.path.join(get_astrbot_data_path(), "plugin_data", "fish_memory")
@@ -1337,7 +1337,7 @@ class BiliReaderPlugin(Star):
         if recent:
             titles = [str(h.get("title"))[:30] for h in recent[-3:]]
             parts.append("最近看的视频：\n" + "\n".join(f"- {x}" for x in titles))
-        return "\n\n".join(parts)
+        return "\n\n".join(parts), len(entries)
 
     def _persona_prompt(self) -> str:
         try:
@@ -1358,9 +1358,10 @@ class BiliReaderPlugin(Star):
         provider = await self.context.get_using_provider_async(self._owner_umo)
         if not provider:
             return ""
-        sources = self._diary_sources()
+        sources, event_count = self._diary_sources()
         if not sources:
             return ""
+        thinking = event_count < 3
         persona = self._persona_prompt()
         system = (
             (persona[:2500] + "\n\n" if persona else "")
@@ -1377,6 +1378,12 @@ class BiliReaderPlugin(Star):
             "代替真实姓名，不要出现 QQ 号、手机号、地址、公司、学校、链接、话题，"
             "不要提 AI、机器人、插件。只输出正文。"
         )
+        if thinking:
+            prompt += (
+                "\n\n最近没什么特别的事，这条不要复述任何具体事件或对话，"
+                "只写一句你自己的念头：对生活、对人、对自己最近状态的观察，"
+                "可以自嘲、可以嘴硬，但要像在想事情。"
+            )
         try:
             resp = await provider.text_chat(prompt=prompt, system_prompt=system)
         except Exception as exc:  # noqa: BLE001
