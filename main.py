@@ -1311,6 +1311,7 @@ class BiliReaderPlugin(Star):
         parts: list[str] = []
         # 所有会话的记忆都可以用，但发出去前会做匿名化
         root = os.path.join(get_astrbot_data_path(), "plugin_data", "fish_memory")
+        cutoff = time.time() - max(1, self._get_int("diary_window_hours", 72)) * 3600
         entries: list[tuple[float, str]] = []
         try:
             for name in sorted(os.listdir(root)):
@@ -1325,8 +1326,11 @@ class BiliReaderPlugin(Star):
                     if str(entry.get("source") or "") == "diary":
                         continue
                     text = str(entry.get("text") or "").strip()
+                    created = float(entry.get("created_at") or 0)
+                    if created < cutoff:
+                        continue
                     if 6 <= len(text) <= 60 and int(entry.get("importance") or 0) >= 2:
-                        entries.append((float(entry.get("created_at") or 0), text))
+                        entries.append((created, text))
             entries.sort(key=lambda pair: pair[0], reverse=True)
             picked = [text for _ts, text in entries[:6]]
             if picked:

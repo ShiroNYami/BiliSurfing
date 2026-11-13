@@ -83,6 +83,12 @@
     "hint": "默认 23 点。",
     "default": 23
   },
+  "diary_window_hours": {
+    "type": "int",
+    "description": "日记素材时间窗（小时）",
+    "hint": "只取最近这么多小时的记忆当素材。默认 72，避免把老事当今天的事写。",
+    "default": 72
+  },
   "owner_qq": {
     "type": "string",
     "description": "允许教它的 QQ 号",
